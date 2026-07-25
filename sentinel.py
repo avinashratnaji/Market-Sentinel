@@ -132,8 +132,20 @@ def main():
 
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("bootstrap")
-    sub.add_parser("doctor")
+    sub.add_parser(
+        "bootstrap",
+        help="Create the project structure"
+    )
+
+    sub.add_parser(
+        "doctor",
+        help="Verify the development environment"
+    )
+
+    sub.add_parser(
+        "collect",
+        help="Collect live market data"
+    )
 
     args = parser.parse_args()
 
@@ -144,6 +156,12 @@ def main():
 
     elif args.command == "doctor":
         doctor()
+
+    elif args.command == "collect":
+        from market_sentinel.services.market_service import MarketService
+
+        service = MarketService()
+        service.collect()
 
     else:
         parser.print_help()

@@ -30,9 +30,9 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          ANGELONE_API_KEY: ${{ secrets.ANGELONE_API_KEY }}
-          ANGELONE_CLIENT_ID: ${{ secrets.ANGELONE_CLIENT_ID }}
-          ANGELONE_PASSWORD: ${{ secrets.ANGELONE_PASSWORD }}
-          ANGELONE_TOTP_SECRET: ${{ secrets.ANGELONE_TOTP_SECRET }}
+          ANGEL_API_KEY: ${{ secrets.ANGELONE_API_KEY }}
+          ANGEL_CLIENT_ID: ${{ secrets.ANGELONE_CLIENT_ID }}
+          ANGEL_PIN: ${{ secrets.ANGELONE_PASSWORD }}
+          ANGEL_TOTP_SECRET: ${{ secrets.ANGELONE_TOTP_SECRET }}
         run: |
           python sentinel.py telegram

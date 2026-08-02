@@ -2,7 +2,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from market_sentinel.database.models.market_data import MarketData as ORMMarketData
 from market_sentinel.database.session import SessionLocal
-from market_sentinel.models.market_data import MarketData
+from market_sentinel.database.models.market_data import MarketData
 from market_sentinel.utils.logger import logger
 from sqlalchemy import select
 from sqlalchemy import desc
@@ -28,6 +28,13 @@ class MarketDataRepository:
                     asset_type=item.asset_type,
                     price=item.price,
                     currency=item.currency,
+
+                    current_volume=item.current_volume,
+                    daily_change_pct=item.daily_change_pct,
+                    weekly_change_pct=item.weekly_change_pct,
+                    monthly_change_pct=item.monthly_change_pct,
+                    average_volume_20d=item.average_volume_20d,
+
                     collected_at=item.collected_at,
                 )
                 for item in records

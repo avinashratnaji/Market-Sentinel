@@ -41,8 +41,17 @@ class Settings:
     # ------------------------------------------------------------------
     # Telegram
     # ------------------------------------------------------------------
-    TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN", "")
-    TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
+    TELEGRAM_ENABLED: bool = (
+            os.getenv("TELEGRAM_ENABLED", "false").lower() == "true"
+    )
+
+    TELEGRAM_BOT_TOKEN: str = os.getenv(
+        "TELEGRAM_BOT_TOKEN", ""
+    )
+
+    TELEGRAM_CHAT_ID: str = os.getenv(
+        "TELEGRAM_CHAT_ID", ""
+    )
 
     # ------------------------------------------------------------------
     # Angel One
@@ -50,11 +59,23 @@ class Settings:
     ANGEL_API_KEY: str = os.getenv("ANGEL_API_KEY", "")
     ANGEL_CLIENT_ID: str = os.getenv("ANGEL_CLIENT_ID", "")
     ANGEL_PIN: str = os.getenv("ANGEL_PIN", "")
+    ANGEL_TOTP_SECRET: str = os.getenv("ANGEL_TOTP_SECRET", "")
 
     # ------------------------------------------------------------------
     # Logging
     # ------------------------------------------------------------------
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+
+    #-------------------------------------------------------------------
+    # Scheduler
+    # -------------------------------------------------------------------
+    COLLECT_INTERVAL: int = int(
+        os.getenv("COLLECT_INTERVAL", "300")
+    )
+
+    RUN_ON_STARTUP: bool = (
+            os.getenv("RUN_ON_STARTUP", "true").lower() == "true"
+    )
 
     @property
     def DATABASE_URL(self) -> str:

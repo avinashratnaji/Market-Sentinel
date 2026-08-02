@@ -1,10 +1,11 @@
 from pathlib import Path
+from market_sentinel.services.telegram_service import TelegramService
 import argparse
 import sys
 
 
 PROJECT_NAME = "Market Sentinel"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 
 def print_banner():
@@ -19,15 +20,15 @@ def bootstrap():
 
     folders = [
         "market_sentinel",
-        "market_sentinel/collectors",
-        "market_sentinel/collectors/base",
-        "market_sentinel/collectors/india",
-        "market_sentinel/collectors/usa",
-        "market_sentinel/collectors/crypto",
-        "market_sentinel/collectors/commodities",
-        "market_sentinel/collectors/news",
-        "market_sentinel/collectors/economy",
-        "market_sentinel/collectors/geopolitics",
+        "market_sentinel/providers",
+        "market_sentinel/providers/base",
+        "market_sentinel/providers/india",
+        "market_sentinel/providers/usa",
+        "market_sentinel/providers/crypto",
+        "market_sentinel/providers/commodities",
+        "market_sentinel/providers/news",
+        "market_sentinel/providers/economy",
+        "market_sentinel/providers/geopolitics",
         "market_sentinel/analyzers",
         "market_sentinel/database",
         "market_sentinel/engine",
@@ -35,7 +36,7 @@ def bootstrap():
         "market_sentinel/services",
         "market_sentinel/config",
         "market_sentinel/utils",
-        "market_sentinel/telegram_bot",
+        "market_sentinel/telegram",
         "market_sentinel/scheduler",
         "docs",
         "tests",
@@ -143,6 +144,11 @@ def main():
     )
 
     sub.add_parser(
+        "scheduler",
+        help="Run continuous market data collection"
+    )
+
+    sub.add_parser(
         "collect",
         help="Collect live market data"
     )
@@ -150,6 +156,21 @@ def main():
     sub.add_parser(
         "latest",
         help="Show latest market data"
+    )
+
+    sub.add_parser(
+        "telegram-test",
+        help="Send Telegram test notification"
+    )
+
+    sub.add_parser(
+        "telegram",
+        help="Send latest market summary"
+    )
+
+    sub.add_parser(
+        "analyze",
+        help="Analyze latest market snapshot"
     )
 
     history_parser = sub.add_parser(
@@ -244,6 +265,37 @@ def main():
         print(f"Records         : {stats.records}")
         print(f"First Record    : {stats.first_time}")
         print(f"Latest Record   : {stats.latest_time}")
+
+    elif args.command == "telegram-test":
+        from market_sentinel.telegram.notifier import TelegramNotifier
+        from market_sentinel.telegram.formatter import TelegramFormatter
+        TelegramNotifier().notify(
+            TelegramFormatter.test_message()
+        )
+
+    elif args.command == "telegram":
+        from market_sentinel.services.telegram_service import TelegramService
+        TelegramService().send_market_summary()
+
+    elif args.command == "scheduler":
+        from market_sentinel.scheduler.scheduler_service import SchedulerService
+        scheduler = SchedulerService()
+        scheduler.start()
+
+    elif args.command == "analyze":
+        from market_sentinel.services.analytics_service import AnalyticsService
+
+        service = AnalyticsService()
+
+        results = service.analyze_latest()
+
+        print()
+        print("=" * 70)
+        print("Market Analytics")
+        print("=" * 70)
+
+        for asset in results:
+            print(asset)
 
     else:
         parser.print_help()

@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Numeric, String
+from sqlalchemy import DateTime, Float, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from market_sentinel.database import Base
@@ -27,6 +27,16 @@ class MarketData(Base):
     price: Mapped[Decimal] = mapped_column(Numeric(18, 4))
 
     currency: Mapped[str] = mapped_column(String(10))
+
+    current_volume: Mapped[float] = mapped_column(Float)
+
+    daily_change_pct: Mapped[float] = mapped_column(Float)
+
+    weekly_change_pct: Mapped[float] = mapped_column(Float)
+
+    monthly_change_pct: Mapped[float] = mapped_column(Float)
+
+    average_volume_20d: Mapped[float] = mapped_column(Float)
 
     collected_at: Mapped[datetime] = mapped_column(
         DateTime,

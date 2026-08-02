@@ -1,5 +1,4 @@
 from pathlib import Path
-from market_sentinel.services.telegram_service import TelegramService
 import argparse
 import sys
 
@@ -274,8 +273,8 @@ def main():
         )
 
     elif args.command == "telegram":
-        from market_sentinel.services.telegram_service import TelegramService
-        TelegramService().send_market_summary()
+        from market_sentinel.services.morning_brief_service import MorningBriefService
+        MorningBriefService().send()
 
     elif args.command == "scheduler":
         from market_sentinel.scheduler.scheduler_service import SchedulerService

@@ -1,21 +1,17 @@
 name: Market Sentinel Morning Brief
 
 on:
+  schedule:
+    # 08:30 IST = 03:00 UTC
+    - cron: "0 3 * * *"
 
   workflow_dispatch:
 
-  push:
-    branches:
-      - main
-
 jobs:
-
   morning-brief:
-
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -40,4 +36,4 @@ jobs:
           ANGELONE_TOTP_SECRET: ${{ secrets.ANGELONE_TOTP_SECRET }}
 
         run: |
-          python sentinel.py
+          python sentinel.py telegram

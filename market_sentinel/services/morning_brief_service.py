@@ -45,17 +45,13 @@ class MorningBriefService:
             "Morning Brief built."
         )
 
-        message = MorningFormatter.format(
-            brief,
-        )
+        messages = MorningFormatter.format(brief)
 
         logger.info(
             "Sending Morning Brief..."
         )
 
-        self.notifier.notify(
-            message,
-        )
+        self.notifier.notify_all(messages)
 
         logger.success(
             "Morning Brief sent successfully."

@@ -9,13 +9,13 @@ Version : 1.0.0
 
 from __future__ import annotations
 
-from market_sentinel.news.models import NewsEvent
+from market_sentinel.news.models import NewsArticle
 
 
 class NewsFormatter:
 
     @staticmethod
-    def format(event: NewsEvent) -> str:
+    def format(event: NewsArticle) -> str:
 
         lines = []
 

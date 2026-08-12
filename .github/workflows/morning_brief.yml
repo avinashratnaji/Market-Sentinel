@@ -1,11 +1,11 @@
-name: Market Sentinel Morning Brief
+name: Market Wavez Daily Brief
 
 on:
   workflow_dispatch:
 
   schedule:
-    # 08:45 AM IST
-    - cron: "15 3 * * 1-5"
+    # 06:00 AM IST
+    - cron: "30 0 * * 1-5"
 
     # 03:45 PM IST
     - cron: "15 10 * * 1-5"

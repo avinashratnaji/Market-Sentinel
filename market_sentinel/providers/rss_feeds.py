@@ -18,22 +18,46 @@ from __future__ import annotations
 
 INDIA = [
 
+    # ------------------------------------------------------
+    # Major Indian Financial News
+    # ------------------------------------------------------
+
     # Economic Times
     "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
 
     # Moneycontrol
-    "https://www.moneycontrol.com/rss/business.xml",
+    # "https://www.moneycontrol.com/rss/business.xml",
 
-    # NSE
-    "https://www.nseindia.com/api/rss?category=market",
+    # Moneycontrol - Markets
+    # "https://www.moneycontrol.com/rss/marketreports.xml",
 
-    # BSE
-    "https://www.bseindia.com/rss/news.aspx",
+    # Times of India - Business
+    "https://timesofindia.indiatimes.com/rssfeeds/1898055.cms",
 
-    # RBI Press Releases
-    "https://www.rbi.org.in/scripts/BS_PressReleaseDisplay.aspx?prid=0",
+    # Business Standard
+    # "https://www.business-standard.com/rss/home_page.rss",
 
-    # SEBI Press Releases
+    # Business Standard - Markets
+    "https://www.business-standard.com/rss/markets-10601.rss",
+
+    # ------------------------------------------------------
+    # Indian Exchanges
+    # ------------------------------------------------------
+
+    # # NSE
+    # "https://www.nseindia.com/api/rss?category=market",
+    #
+    # # BSE
+    # "https://www.bseindia.com/rss/news.aspx",
+
+    # ------------------------------------------------------
+    # Indian Regulators
+    # ------------------------------------------------------
+
+    # RBI
+    # "https://www.rbi.org.in/scripts/BS_PressReleaseDisplay.aspx?prid=0",
+
+    # SEBI
     "https://www.sebi.gov.in/sebirss.xml",
 ]
 

@@ -1,73 +1,87 @@
+"""
+telegram/bot.py
+
+Low-level Telegram Bot wrapper.
+
+Responsible only for communicating with Telegram.
+
+Author : Market Sentinel
+Version : 2.1.0
+"""
+
 from telegram import Bot
 from telegram.constants import ParseMode
-from telegram.error import TelegramError, TimedOut
-from telegram.request import HTTPXRequest
+from telegram.error import TelegramError
 
 from market_sentinel.config.settings import settings
 from market_sentinel.utils.logger import logger
 
-import asyncio
-
 
 class TelegramBot:
+    """
+    Low-level Telegram Bot wrapper.
+    """
 
     def __init__(self):
 
-        request = HTTPXRequest(
-
-            connect_timeout=30.0,
-            read_timeout=30.0,
-            write_timeout=30.0,
-            pool_timeout=30.0,
-
-        )
-
         self.bot = Bot(
-
-            token=settings.TELEGRAM_BOT_TOKEN,
-            request=request,
-
+            token=settings.TELEGRAM_BOT_TOKEN
         )
 
         self.chat_id = settings.TELEGRAM_CHAT_ID
 
-    async def send_message(self, message: str) -> None:
+    async def send_message(
+        self,
+        message: str,
+    ) -> None:
+        """
+        Send an HTML formatted Telegram message.
+        """
 
-        for attempt in range(1, 4):
+        try:
 
-            try:
+            await self.bot.send_message(
+                chat_id=self.chat_id,
+                text=message,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
 
-                await self.bot.send_message(
+            logger.success(
+                "Telegram message sent successfully."
+            )
 
-                    chat_id=self.chat_id,
+        except TelegramError as ex:
 
-                    text=message,
+            logger.exception(
+                f"Telegram Error: {ex}"
+            )
 
-                    parse_mode=ParseMode.HTML,
+            raise
 
-                    disable_web_page_preview=True,
+    async def send_sticker(
+        self,
+        sticker_id: str,
+    ) -> None:
+        """
+        Send an animated Telegram sticker.
+        """
 
-                )
+        try:
 
-                logger.success(
-                    "Telegram message sent."
-                )
+            await self.bot.send_sticker(
+                chat_id=self.chat_id,
+                sticker=sticker_id,
+            )
 
-                return
+            logger.success(
+                "Telegram sticker sent successfully."
+            )
 
-            except TimedOut:
+        except TelegramError as ex:
 
-                logger.warning(
-                    "Telegram timeout. Retry {}/3",
-                    attempt,
-                )
+            logger.exception(
+                f"Telegram Sticker Error: {ex}"
+            )
 
-                await asyncio.sleep(2)
-
-            except TelegramError:
-
-                raise
-
-        raise RuntimeError(
-            "Telegram failed after 3 retries."
-        )
+            raise

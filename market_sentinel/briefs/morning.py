@@ -34,32 +34,31 @@ from market_sentinel.providers.angelone.losers import (
     LosersProvider,
 )
 
-from market_sentinel.news.aggregator import (
-    NewsAggregator,
+from market_sentinel.providers.news.indian_market_news import (
+    IndianMarketNews,
 )
 
-from market_sentinel.news.classifier import (
-    NewsClassifier,
+from market_sentinel.providers.news.news_ranker import (
+    NewsRanker,
 )
 
-from market_sentinel.news.entity_extractor import (
-    EntityExtractor,
+from market_sentinel.providers.news.global_impact_news import (
+    GlobalImpactNews,
+)
+from market_sentinel.providers.news.crypto_market_news import CryptoMarketNews
+from market_sentinel.providers.external_markets import ExternalMarketsProvider
+from market_sentinel.providers.nse_movers import NseMoversProvider
+from market_sentinel.providers.premarket import PreMarketProvider
+from market_sentinel.providers.sensex import SensexProvider
+from market_sentinel.providers.us_movers import UsMarketMoversProvider
+
+from market_sentinel.providers.market_brief_data import (
+    InstitutionalFlowProvider,
+    IpoGmpProvider,
 )
 
-from market_sentinel.news.sector_mapper import (
-    SectorMapper,
-)
-
-from market_sentinel.news.scoring_engine import (
-    NewsScoringEngine,
-)
-
-from market_sentinel.news.summary_builder import (
-    NewsSummaryBuilder,
-)
-
-from market_sentinel.news.sources.yahoo_finance.provider import (
-    YahooFinanceProvider,
+from market_sentinel.briefs.ai_summary import (
+    MarketSummaryGenerator,
 )
 
 
@@ -76,6 +75,27 @@ class MorningBriefBuilder:
         self.losers = LosersProvider()
 
         self.health = MarketHealthEngine()
+
+        # The briefing feed must be India-first.  The collector removes
+        # irrelevant global/personal-finance stories; NewsRanker then scores,
+        # clusters and diversifies the final event-level selection.
+        self.news = IndianMarketNews()
+
+        self.news_ranker = NewsRanker()
+
+        self.global_news = GlobalImpactNews()
+        self.crypto_news = CryptoMarketNews()
+        self.external_markets = ExternalMarketsProvider()
+        self.nse_movers = NseMoversProvider()
+        self.premarket = PreMarketProvider()
+        self.sensex = SensexProvider()
+        self.us_movers = UsMarketMoversProvider()
+
+        self.institutional_flows = InstitutionalFlowProvider()
+
+        self.ipo_gmp = IpoGmpProvider()
+
+        self.summary_generator = MarketSummaryGenerator()
 
     def build(self) -> MorningBrief:
 
@@ -95,40 +115,48 @@ class MorningBriefBuilder:
 
             sectors=self.sectors.fetch(),
 
-            gainers=self.gainers.fetch(),
+            gainers=self.nse_movers.fetch("gainers") or self.gainers.fetch(),
 
-            losers=self.losers.fetch(),
+            losers=self.nse_movers.fetch("losers") or self.losers.fetch(),
         )
 
         # ----------------------------------------------------
         # News
         # ----------------------------------------------------
 
-        articles = NewsAggregator(
-            [
-                YahooFinanceProvider(),
-            ]
-        ).fetch()
-
-        articles = NewsClassifier.classify(
-            articles,
-        )
-
-        articles = EntityExtractor.extract(
-            articles,
-        )
-
-        articles = SectorMapper.map(
-            articles,
-        )
-
-        articles = NewsScoringEngine.score(
-            articles,
-        )
-
-        brief.top_news = NewsSummaryBuilder.build(
-            articles,
+        brief.indian_news = self.news_ranker.rank(
+            self.news.collect(),
             limit=5,
+        )
+
+        # Backwards compatibility for existing consumers that read top_news.
+        brief.top_news = brief.indian_news
+
+        brief.global_impact_news = self.global_news.collect(limit=5)
+        brief.crypto_news = self.crypto_news.collect(limit=5)
+        (
+            brief.global_indices,
+            brief.indian_adrs,
+            brief.commodities,
+            brief.crypto,
+        ) = self.external_markets.fetch()
+        brief.us_gainers = self.us_movers.fetch("gainers")
+        brief.us_losers = self.us_movers.fetch("losers")
+
+        brief.investor_flows = self.institutional_flows.fetch()
+
+        brief.top_ipos = self.ipo_gmp.fetch_top(limit=10)
+        brief.fo_ban_symbols = self.premarket.fetch_fo_ban()
+        brief.fo_ban_available = self.premarket.fo_ban_available
+        brief.gift_nifty = self.premarket.fetch_gift_nifty()
+
+        if not any(item.name.upper() == "SENSEX" for item in brief.indices):
+            sensex = self.sensex.fetch()
+            if sensex:
+                brief.indices.insert(1, sensex)
+
+        brief.ai_summary, brief.ai_summary_source = (
+            self.summary_generator.generate(brief)
         )
 
         return self.health.calculate(

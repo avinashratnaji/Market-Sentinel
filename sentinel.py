@@ -162,10 +162,24 @@ def main():
         help="Send Telegram test notification"
     )
 
-    sub.add_parser(
+    telegram_parser = sub.add_parser(
         "telegram",
         help="Send latest market summary"
     )
+    telegram_parser.add_argument(
+        "--section",
+        choices=("full", "indian_markets", "movers", "global_markets", "us_movers", "crypto", "ipos", "flows"),
+        default="full",
+        help="Send one live terminal panel instead of the full brief",
+    )
+    telegram_parser.add_argument(
+        "--brief",
+        choices=("full", "morning", "afternoon", "night"),
+        default="full",
+        help="Scheduled briefing window to publish",
+    )
+
+    sub.add_parser("telegram-listen", help="Run the Telegram command listener")
 
     sub.add_parser(
         "analyze",
@@ -274,7 +288,11 @@ def main():
 
     elif args.command == "telegram":
         from market_sentinel.services.morning_brief_service import MorningBriefService
-        MorningBriefService().send()
+        MorningBriefService().send(section=args.section, window=args.brief)
+
+    elif args.command == "telegram-listen":
+        from market_sentinel.telegram.commands import TelegramCommandServer
+        TelegramCommandServer().run()
 
     elif args.command == "scheduler":
         from market_sentinel.scheduler.scheduler_service import SchedulerService

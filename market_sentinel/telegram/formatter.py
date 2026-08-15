@@ -45,7 +45,7 @@ class BroadcastFormatter:
         lines = []
 
         lines.append(cls.LINE)
-        lines.append("🌍 <b>MARKET WAVEZ | DAILY BRIEF</b>")
+        lines.append("🌍 <b>DAILY MARKET BRIEF</b>")
         lines.append(f"📅 {brief.generated_at}")
         lines.append(cls.LINE)
         lines.append("")

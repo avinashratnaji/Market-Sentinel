@@ -1,17 +1,39 @@
-name: Market Sentinel Morning Brief
+name: Market Wavez Morning Pre-Market
 
 on:
   workflow_dispatch:
+    inputs:
+      section:
+        description: "Brief panel to send"
+        required: false
+        default: "full"
+        type: choice
+        options:
+          - full
+          - indian_markets
+          - movers
+          - global_markets
+          - us_movers
+          - crypto
+          - ipos
+          - flows
+      brief:
+        description: "Scheduled briefing window"
+        required: false
+        default: "morning"
+        type: choice
+        options:
+          - morning
+          - afternoon
+          - night
+          - full
 
   schedule:
-    # 08:45 AM IST
-    - cron: "15 3 * * 1-5"
-
-    # 03:45 PM IST
-    - cron: "15 10 * * 1-5"
+    # 08:00 AM IST (UTC+5:30)
+    - cron: "30 2 * * 1-5"
 
 jobs:
-  morning:
+  morning_premarket:
     runs-on: ubuntu-latest
 
     steps:
@@ -35,4 +57,4 @@ jobs:
           ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
         run: |
-          python sentinel.py telegram
+          python sentinel.py telegram --brief "${{ inputs.brief || 'morning' }}" --section "${{ inputs.section || 'full' }}"

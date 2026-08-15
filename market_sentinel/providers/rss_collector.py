@@ -302,10 +302,24 @@ class RSSCollector:
             or ""
         ).strip()
 
+        # Google News RSS carries the original publisher in entry.source. Use
+        # it instead of labelling every article "Google News", so downstream
+        # quality filters can reliably accept Reuters/BBC/etc. and reject
+        # untrusted publishers.
+        publisher = source
+        entry_source = entry.get("source")
+        if source == "Google News" and entry_source:
+            try:
+                publisher = self._normalize_source_name(
+                    str(entry_source.get("title", "")).strip()
+                ) or source
+            except (AttributeError, TypeError):
+                publisher = source
+
         return NewsArticle(
             title=title,
             summary=summary,
-            source=source,
+            source=publisher,
             url=url,
             published_at=published_at,
         )
@@ -368,6 +382,12 @@ class RSSCollector:
 
         if "reuters.com" in hostname:
             return "Reuters"
+
+        if "bbc.co.uk" in hostname or "bbc.com" in hostname:
+            return "BBC News"
+
+        if "news.google.com" in hostname:
+            return "Google News"
 
         if "cnbc.com" in hostname:
             return "CNBC"

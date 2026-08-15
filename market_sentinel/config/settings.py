@@ -45,29 +45,13 @@ class Settings:
             os.getenv("TELEGRAM_ENABLED", "false").lower() == "true"
     )
 
-    # TELEGRAM_TOKEN was used in the project's original .env template.
-    # Prefer the explicit name but remain compatible with existing installs.
-    TELEGRAM_BOT_TOKEN: str = (
-        os.getenv("TELEGRAM_BOT_TOKEN", "")
-        or os.getenv("TELEGRAM_TOKEN", "")
+    TELEGRAM_BOT_TOKEN: str = os.getenv(
+        "TELEGRAM_BOT_TOKEN", ""
     )
 
     TELEGRAM_CHAT_ID: str = os.getenv(
         "TELEGRAM_CHAT_ID", ""
     )
-    TELEGRAM_COMMAND_CHAT_ID: str = os.getenv("TELEGRAM_COMMAND_CHAT_ID", "")
-
-    # GitHub Actions dispatch for on-demand Telegram commands. Use a fine-
-    # grained token with Actions: write for this repository only.
-    GITHUB_REPOSITORY: str = os.getenv("GITHUB_REPOSITORY", "")
-    GITHUB_ACTIONS_TOKEN: str = os.getenv("GITHUB_ACTIONS_TOKEN", "")
-    GITHUB_REF: str = os.getenv("GITHUB_REF", "main")
-
-    # ------------------------------------------------------------------
-    # OpenAI market-summary generation
-    # ------------------------------------------------------------------
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
 
     # ------------------------------------------------------------------
     # Angel One

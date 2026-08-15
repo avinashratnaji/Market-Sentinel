@@ -1,14 +1,27 @@
 """
 market_sentinel/telegram/morning.py
 
-Formats the Morning Brief for Telegram.
+Production-grade Telegram Morning Brief Formatter.
 
-Author : Market Wavez
+Responsibilities:
+    - Format executive market summary
+    - Format Indian market indices
+    - Format sector performance
+    - Format top gainers / losers
+    - Format TOP 5 Indian market news
+    - Safely escape Telegram HTML
+    - Keep messages within Telegram limits
+    - Prevent duplicate news presentation
+    - Handle incomplete / optional data safely
+
+Author  : Market Wavez
+Version : 3.0.0
 """
 
 from __future__ import annotations
 
 from html import escape
+from typing import Any
 
 from market_sentinel.briefs.models import MorningBrief
 
@@ -17,11 +30,7 @@ class MorningFormatter:
     """
     Production Telegram formatter for Morning Brief.
 
-    LINE = "━━━━━━━━━━━━━━━━━━━━"
-
-    # ==========================================================
-    # MAIN FORMATTER
-    # ==========================================================
+    Telegram uses HTML parse mode.
 
     The formatter deliberately keeps TOP 5 news in the
     executive message and does NOT repeat the same articles
@@ -51,101 +60,158 @@ class MorningFormatter:
         """
         Convert MorningBrief into Telegram messages.
 
+        Message structure:
+
+            1. Executive Summary + TOP 5 Indian News
+            2. Indian Markets
+            3. Sector Heatmap
+            4. Top Gainers / Losers
+
+        Returns:
+            list[str]: Telegram-ready HTML messages.
+        """
+
         messages: list[str] = []
 
-        # ======================================================
+        # ------------------------------------------------------
         # MESSAGE 1
-        # Executive Summary
-        # ======================================================
+        # Executive Summary + TOP 5
+        # ------------------------------------------------------
+
+        messages.append(
+            cls._build_executive_message(brief)
+        )
+
+        # ------------------------------------------------------
+        # MESSAGE 2
+        # Indian Markets
+        # ------------------------------------------------------
+
+        if brief.indices:
+            messages.append(
+                cls._build_indices_message(brief)
+            )
+
+        # ------------------------------------------------------
+        # MESSAGE 3
+        # Sector Heatmap
+        # ------------------------------------------------------
+
+        if brief.sectors:
+            messages.append(
+                cls._build_sector_message(brief)
+            )
+
+        # ------------------------------------------------------
+        # MESSAGE 4
+        # Top Movers
+        # ------------------------------------------------------
+
+        if brief.gainers or brief.losers:
+            messages.append(
+                cls._build_movers_message(brief)
+            )
+
+        return [
+            cls._fit_telegram_limit(message)
+            for message in messages
+            if message.strip()
+        ]
+
+    # ==========================================================
+    # MESSAGE 1
+    # ==========================================================
+
+    @classmethod
+    def _build_executive_message(
+        cls,
+        brief: MorningBrief,
+    ) -> str:
+        """Build executive summary and TOP 5 Indian market news."""
 
         lines: list[str] = []
 
         sentiment = (
-            brief.market_sentiment
+            getattr(
+                brief,
+                "market_sentiment",
+                None,
+            )
             or "Neutral"
         )
 
-        sentiment_emoji = (
-            MorningFormatter._sentiment_emoji(
-                sentiment
+        sentiment_emoji = cls._sentiment_emoji(
+            sentiment
+        )
+
+        generated_at = getattr(
+            brief,
+            "generated_at",
+            None,
+        )
+
+        # ------------------------------------------------------
+        # Header
+        # ------------------------------------------------------
+
+        lines.append(cls.LINE)
+        lines.append(
+            "🇮🇳 <b>MARKET WAVES — INDIA MORNING BRIEF</b>"
+        )
+        lines.append(cls.LINE)
+
+        if generated_at:
+
+            lines.append(
+                f"📅 <b>{generated_at:%d %b %Y}</b>"
+                f" | ⏰ <b>{generated_at:%I:%M %p} IST</b>"
+            )
+
+        lines.append("")
+
+        # ------------------------------------------------------
+        # Market Health
+        # ------------------------------------------------------
+
+        health_score = cls._safe_number(
+            getattr(
+                brief,
+                "health_score",
+                0,
+            )
+        )
+
+        confidence = cls._safe_number(
+            getattr(
+                brief,
+                "confidence",
+                0,
             )
         )
 
         lines.append(
-            f"📅 <b>{brief.generated_at:%d %b %Y}</b>"
-            f" | ⏰ <b>{brief.generated_at:%I:%M %p} IST</b>"
-        )
-
-        lines.append("")
-
-        lines.append(
-            f"🩺 <b>Health:</b> "
-            f"<code>{brief.health_score}/100</code>"
+            f"🩺 <b>Market Health:</b> "
+            f"{cls._health_emoji(health_score)} "
+            f"<code>{health_score:.0f}/100</code> "
+            f"<b>{cls._health_label(health_score)}</b>"
         )
 
         lines.append(
-            f"🐻 <b>Sentiment:</b> "
-            f"<b>{escape(sentiment)}</b> "
-            f"({brief.confidence}%) "
+            f"🐂 <b>Sentiment:</b> "
+            f"<b>{escape(str(sentiment))}</b> "
+            f"({confidence:.0f}% confidence) "
             f"{sentiment_emoji}"
         )
 
         lines.append("")
 
+        # ------------------------------------------------------
+        # TOP 5
+        # ------------------------------------------------------
+
         lines.append(
             "📰 <b>TOP 5 THINGS TODAY</b>"
         )
-
-        lines.append(
-            MorningFormatter.LINE
-        )
-
-        lines.append("")
-
-        if brief.ai_summary:
-            lines.append("<b>MARKET READ</b>")
-            lines.append(MorningFormatter.LINE)
-            lines.append(escape(brief.ai_summary))
-            lines.append("")
-
-        indian_news = brief.indian_news or brief.top_news
-
-        if indian_news:
-
-            for number, article in enumerate(
-                indian_news[:5],
-                start=1,
-            ):
-
-                title = (
-                    article.title
-                    or "Market update"
-                )
-
-                lines.append(
-                    f"{number}️⃣ "
-                    f"{escape(title)}"
-                )
-
-        else:
-
-            lines.append(
-                "No major market-moving events today."
-            )
-
-        # Compose the public lead message in the detailed channel format.
-        lines = MorningFormatter._india_news_message(brief)
-
-        messages.append(
-            "\n".join(lines)
-        )
-
-        # ======================================================
-        # MESSAGE 2
-        # Indian Markets
-        # ======================================================
-
-        if brief.indices:
 
         lines.append(cls.LINE)
 
@@ -165,37 +231,89 @@ class MorningFormatter:
                 "news detected."
             )
 
-            lines.append(
-                "📊 <b>INDIAN MARKETS</b>"
+        else:
+
+            selected_news = cls._select_unique_news(
+                top_news,
+                limit=cls.MAX_TOP_NEWS,
+            )
+
+            for number, article in enumerate(
+                selected_news,
+                start=1,
+            ):
+
+                lines.extend(
+                    cls._news_block(
+                        article,
+                        number,
+                    )
+                )
+
+                if number < len(selected_news):
+                    lines.append("")
+
+        lines.append("")
+        lines.append(cls.LINE)
+
+        lines.append(
+            "⚡ <i>India-first market intelligence | "
+            "News ranked by relevance, impact and recency</i>"
+        )
+
+        return "\n".join(lines)
+
+    # ==========================================================
+    # NEWS BLOCK
+    # ==========================================================
+
+    @classmethod
+    def _news_block(
+        cls,
+        article: Any,
+        number: int,
+    ) -> list[str]:
+        """
+        Format one news article.
+
+        Supports the current NewsArticle model while
+        gracefully handling future intelligence fields.
+        """
+
+        lines: list[str] = []
+
+        title = (
+            getattr(
+                article,
+                "title",
+                None,
             )
             or "Market update"
         )
 
-            lines.append(
-                MorningFormatter.LINE
+        source = (
+            getattr(
+                article,
+                "source",
+                None,
             )
+            or "Unknown source"
+        )
 
-            # ----------------------------------------------
-            # Separate UP / DOWN
-            # ----------------------------------------------
-
-            up = sorted(
-                [
-                    index
-                    for index in brief.indices
-                    if index.percent_change >= 0
-                ],
-                key=lambda x: x.percent_change,
-                reverse=True,
+        url = (
+            getattr(
+                article,
+                "url",
+                None,
             )
+            or ""
+        ).strip()
 
-            down = sorted(
-                [
-                    index
-                    for index in brief.indices
-                    if index.percent_change < 0
-                ],
-                key=lambda x: x.percent_change,
+        summary = (
+            getattr(
+                article,
+                "summary",
+                None,
             )
             or ""
         ).strip()
@@ -208,61 +326,30 @@ class MorningFormatter:
             )
         )
 
-            # ----------------------------------------------
-            # UP
-            # ----------------------------------------------
-
-            if up:
-
-                lines.append("")
-
-                lines.append(
-                    "🟢 <b>UP</b>"
-                )
-
-                lines.append("")
-
-                for index in up:
-
-                    lines.append(
-                        MorningFormatter._market_row(
-                            index
-                        )
-                    )
-
-            # ----------------------------------------------
-            # DOWN
-            # ----------------------------------------------
-
-            if down:
-
-                lines.append("")
-
-                lines.append(
-                    "🔴 <b>DOWN</b>"
-                )
-
-                lines.append("")
-
-                for index in down:
-
-                    lines.append(
-                        MorningFormatter._market_row(
-                            index
-                        )
-                    )
-
-            messages.append(
-                "\n".join(lines)
+        impact = cls._safe_number(
+            getattr(
+                article,
+                "impact",
+                0,
             )
         )
 
-        # ======================================================
-        # MESSAGE 3
-        # Sector Heatmap
-        # ======================================================
+        importance = cls._safe_number(
+            getattr(
+                article,
+                "importance",
+                0,
+            )
+        )
 
-        if brief.sectors:
+        category = (
+            getattr(
+                article,
+                "category",
+                None,
+            )
+            or "Market News"
+        )
 
         entities = (
             getattr(
@@ -273,170 +360,94 @@ class MorningFormatter:
             or []
         )
 
-            lines.append(
-                "🌡 <b>SECTOR HEATMAP</b>"
+        sectors = (
+            getattr(
+                article,
+                "sectors",
+                None,
             )
             or []
         )
 
+        published_at = getattr(
+            article,
+            "published_at",
+            None,
+        )
+
+        # ------------------------------------------------------
+        # Number + severity
+        # ------------------------------------------------------
+
+        severity = cls._news_severity(
+            score,
+            impact,
+            importance,
+        )
+
+        lines.append(
+            f"{severity} <b>{number}. "
+            f"{escape(str(title))}</b>"
+        )
+
+        # ------------------------------------------------------
+        # Score
+        # ------------------------------------------------------
+
+        if score > 0:
+
             lines.append(
-                MorningFormatter.LINE
+                f"   🎯 <b>Impact Score:</b> "
+                f"<code>{score:.0f}/100</code> "
+                f"{cls._score_label(score)}"
             )
 
-            positive = []
-            neutral = []
-            negative = []
+        # ------------------------------------------------------
+        # Category
+        # ------------------------------------------------------
 
-            # ----------------------------------------------
-            # Sort strongest to weakest
-            # ----------------------------------------------
+        category_text = cls._enum_text(
+            category
+        )
 
-            sectors = sorted(
-                brief.sectors,
-                key=lambda s: s.percent_change,
-                reverse=True,
+        if category_text:
+
+            lines.append(
+                f"   🏷 <b>Event:</b> "
+                f"{escape(category_text)}"
             )
 
-            for sector in sectors:
+        # ------------------------------------------------------
+        # Entities
+        # ------------------------------------------------------
 
-                row = (
-                    MorningFormatter._sector_row(
-                        sector
-                    )
-                )
-
-                if sector.percent_change > 0.20:
-
-                    positive.append(row)
-
-                elif sector.percent_change < -0.20:
-
-                    negative.append(row)
-
-                else:
-
-                    neutral.append(row)
-
-            # ----------------------------------------------
-            # BULLISH
-            # ----------------------------------------------
-
-            if positive:
-
-                lines.append("")
-
-                lines.append(
-                    "🟢 <b>BULLISH</b>"
-                )
-
-                for row in positive:
-                    lines.append(row)
-
-            # ----------------------------------------------
-            # NEUTRAL
-            # ----------------------------------------------
-
-            if neutral:
-
-                lines.append("")
-
-                lines.append(
-                    "🟡 <b>NEUTRAL</b>"
-                )
-
-                for row in neutral:
-                    lines.append(row)
-
-            # ----------------------------------------------
-            # BEARISH
-            # ----------------------------------------------
-
-            if negative:
-
-                lines.append("")
-
-                lines.append(
-                    "🔴 <b>BEARISH</b>"
-                )
-
-                for row in negative:
-                    lines.append(row)
-
-            messages.append(
-                "\n".join(lines)
-            )
-
-        # ======================================================
-        # MESSAGE 4
-        # Top Movers
-        # ======================================================
-
-        if brief.gainers or brief.losers:
+        entity_text = cls._format_list(
+            entities,
+            limit=5,
+        )
 
         if entity_text:
 
-            # ==================================================
-            # TOP GAINERS
-            # ==================================================
+            lines.append(
+                f"   🏢 <b>Entities:</b> "
+                f"{escape(entity_text)}"
+            )
 
-            if brief.gainers:
+        # ------------------------------------------------------
+        # Sectors
+        # ------------------------------------------------------
 
-                lines.append(
-                    "🚀 <b>TOP GAINERS</b>"
-                )
+        sector_text = cls._format_list(
+            sectors,
+            limit=4,
+        )
 
-                lines.append(
-                    MorningFormatter.LINE
-                )
+        if sector_text:
 
-                lines.append("")
-
-                gainers = sorted(
-                    brief.gainers,
-                    key=lambda s: s.percent_change,
-                    reverse=True,
-                )
-
-                for stock in gainers[:5]:
-
-                    lines.append(
-                        MorningFormatter._stock_row(
-                            stock,
-                            direction="up",
-                        )
-                    )
-
-            # ==================================================
-            # TOP LOSERS
-            # ==================================================
-
-            if brief.losers:
-
-                lines.append("")
-
-                lines.append(
-                    "🩸 <b>TOP LOSERS</b>"
-                )
-
-                lines.append(
-                    MorningFormatter.LINE
-                )
-
-                lines.append("")
-
-                losers = sorted(
-                    brief.losers,
-                    key=lambda s: s.percent_change,
-                )
-
-                for stock in losers[:5]:
-
-                    lines.append(
-                        MorningFormatter._stock_row(
-                            stock,
-                            direction="down",
-                        )
-                    )
+            lines.append(
+                f"   📌 <b>Sectors:</b> "
+                f"{escape(sector_text)}"
+            )
 
         # ------------------------------------------------------
         # Summary
@@ -453,14 +464,24 @@ class MorningFormatter:
                 220,
             )
 
-        # ======================================================
-        # MESSAGE 5
-        # Top Market News
-        # ======================================================
+            lines.append(
+                f"   💡 {escape(clean_summary)}"
+            )
 
-        # Indian Top 5 is already sent in the first message. Keep this legacy
-        # detail message only for callers that have not populated indian_news.
-        if brief.top_news and not brief.indian_news:
+        # ------------------------------------------------------
+        # Source
+        # ------------------------------------------------------
+
+        lines.append(
+            f"   📰 <b>Source:</b> "
+            f"{escape(str(source))}"
+        )
+
+        # ------------------------------------------------------
+        # Published time
+        # ------------------------------------------------------
+
+        if published_at:
 
             lines.append(
                 "   🕒 <b>Published:</b> "
@@ -473,31 +494,77 @@ class MorningFormatter:
 
         if url:
 
-            lines.append(
-                "🌐 <b>TOP MARKET NEWS</b>"
+            safe_url = escape(
+                url,
+                quote=True,
             )
 
             lines.append(
-                MorningFormatter.LINE
+                f'   🔎 <a href="{safe_url}">'
+                f"Read Full Story</a>"
             )
 
-            lines.append("")
+        return lines
 
-            for article in brief.top_news[:8]:
+    # ==========================================================
+    # MESSAGE 2 — INDIAN MARKETS
+    # ==========================================================
 
-                title = (
-                    article.title
-                    or "Market News"
+    @classmethod
+    def _build_indices_message(
+        cls,
+        brief: MorningBrief,
+    ) -> str:
+        """Build Indian indices section."""
+
+        lines: list[str] = []
+
+        lines.append(
+            "📊 <b>INDIAN MARKETS</b>"
+        )
+
+        lines.append(cls.LINE)
+
+        indices = list(
+            getattr(
+                brief,
+                "indices",
+                None,
+            )
+            or []
+        )
+
+        up = sorted(
+            [
+                index
+                for index in indices
+                if cls._safe_number(
+                    getattr(
+                        index,
+                        "percent_change",
+                        0,
+                    )
+                ) >= 0
+            ],
+            key=lambda item: cls._safe_number(
+                getattr(
+                    item,
+                    "percent_change",
+                    0,
                 )
+            ),
+            reverse=True,
+        )
 
-                title = escape(title)
-
-                if article.url:
-
-                    lines.append(
-                        f'🔗 <a href="{escape(article.url, quote=True)}">'
-                        f"{title}"
-                        f"</a>"
+        down = sorted(
+            [
+                index
+                for index in indices
+                if cls._safe_number(
+                    getattr(
+                        index,
+                        "percent_change",
+                        0,
                     )
                 ) < 0
             ],
@@ -678,21 +745,17 @@ class MorningFormatter:
                 "🚀 <b>TOP GAINERS</b>"
             )
 
-                else:
+            lines.append(cls.LINE)
+            lines.append("")
 
-                    lines.append(
-                        f"📰 {title}"
-                    )
+            for stock in gainers[
+                :cls.MAX_GAINERS
+            ]:
 
-                source = (
-                    article.source
-                    or ""
-                ).strip()
-
-                if source:
-
-                    lines.append(
-                        f"   <i>{escape(source)}</i>"
+                lines.append(
+                    cls._stock_row(
+                        stock,
+                        direction="up",
                     )
                 )
 
@@ -705,473 +768,60 @@ class MorningFormatter:
                 "🩸 <b>TOP LOSERS</b>"
             )
 
-        # This is always present so a feed failure cannot silently make the
-        # global-market watch disappear from the daily brief.
-        messages.append("\n".join(MorningFormatter._global_news_message(brief)))
-        messages.append("\n".join(MorningFormatter._external_markets_message(brief)))
-        messages.append("\n".join(MorningFormatter._us_movers_message(brief)))
-        messages.append("\n".join(MorningFormatter._crypto_news_message(brief)))
-
-        if brief.investor_flows or brief.top_ipos:
-            lines = [
-                "<b>INSTITUTIONAL FLOWS</b>",
-                MorningFormatter.LINE,
-                "",
-            ]
-            if brief.investor_flows:
-                flow = brief.investor_flows
-                lines.append(f"<b>FII / DII CASH MARKET — {flow.trade_date:%d %b %Y}</b>")
-                lines.append("")
-                lines.extend(MorningFormatter._institutional_ledger("FII / FPI", flow.fii_buy, flow.fii_sell, flow.fii_net))
-                lines.append("")
-                lines.extend(MorningFormatter._institutional_ledger("DII", flow.dii_buy, flow.dii_sell, flow.dii_net))
-                lines.append(f"<i>Source: {escape(flow.source)}</i>")
-                if flow.source != "NSE":
-                    lines.append("<i>Values were not published in this run; no estimate is shown.</i>")
-                lines.append("")
-            lines.append("<b>CURRENT OPEN IPOs — GMP WATCH</b>")
-            lines.append("<i>Ranked by GMP %; includes IPOs live for the next trading session.</i>")
+            lines.append(cls.LINE)
             lines.append("")
-            if brief.top_ipos:
-                mainboard = [ipo for ipo in brief.top_ipos if "MAIN" in (ipo.issue_type or "").upper()]
-                sme = [ipo for ipo in brief.top_ipos if "SME" in (ipo.issue_type or "").upper()]
-                unclassified = [ipo for ipo in brief.top_ipos if ipo not in mainboard and ipo not in sme]
-                groups = (("MAINBOARD IPOs", mainboard), ("SME IPOs", sme), ("OTHER OPEN IPOs", unclassified))
-                for section_title, ipos in groups:
-                    if not ipos:
-                        continue
-                    lines.extend((f"<b>{section_title}</b>", ""))
-                    for number, ipo in enumerate(ipos[:5], start=1):
-                        percent = f" ({ipo.gmp_percent:.1f}%)" if ipo.gmp_percent is not None else ""
-                        issue_price = f"₹{ipo.price_band_high:,.0f}" if ipo.price_band_high is not None else "Not published"
-                        subscription = (
-                            f" | {ipo.subscription_open:%d %b}–{ipo.subscription_close:%d %b}"
-                            if ipo.subscription_open and ipo.subscription_close
-                            else f" | Closes {ipo.subscription_close:%d %b}" if ipo.subscription_close else ""
-                        )
-                        availability = (
-                            f" (Opens {ipo.subscription_open:%d %b})"
-                            if ipo.subscription_open and ipo.subscription_open.date() > brief.generated_at.date()
-                            else ""
-                        )
-                        gmp = f"<code>₹{ipo.gmp:,.0f}</code>{percent}" if ipo.gmp is not None else "<code>Awaiting GMP quote</code>"
-                        issue_type = MorningFormatter._ipo_type(ipo.issue_type)
-                        lot = f"{ipo.lot_size:,}" if ipo.lot_size else "Not published"
-                        amount = (
-                            f"₹{ipo.lot_size * ipo.price_band_high:,.0f}"
-                            if ipo.lot_size and ipo.price_band_high else "Not published"
-                        )
-                        about = " ".join((ipo.about or "").split()) or "Company details are being verified."
-                        if len(about) > 180:
-                            about = about[:177].rsplit(" ", 1)[0] + "…"
-                        lines.append(
-                            f"{number}. <b>{escape(ipo.name)}</b>\n"
-                            f"   Type        : <code>{escape(issue_type)}</code>\n"
-                            f"   GMP         : {gmp}\n"
-                            f"   Issue Price : <code>{issue_price}</code>\n"
-                            f"   Minimum Qty : <code>{lot}</code>\n"
-                            f"   Amount      : <code>{amount}</code>\n"
-                            f"   Valid from  : <code>{subscription.lstrip(' |')}</code>{availability}\n"
-                            f"   About       : {escape(about)}\n"
-                        )
-                lines.extend(("", "<i>GMP is informal, volatile, and not an official exchange price.</i>"))
-            else:
-                lines.append("No open Mainboard or SME IPO was returned by the official NSE issue list or GMP sources in this run.")
 
-            if False and brief.top_ipos:
-                lines.append("<b>TOP 5 IPO GMP (INDICATIVE)</b>")
-                for number, ipo in enumerate(brief.top_ipos[:5], start=1):
-                    percent = f" ({ipo.gmp_percent:.1f}%)" if ipo.gmp_percent is not None else ""
-                    close = f" | closes {ipo.subscription_close:%d %b}" if ipo.subscription_close else ""
-                    updated = f" | GMP {ipo.updated_at:%d %b %I:%M %p}" if ipo.updated_at else ""
-                    lines.append(
-                        f"{number}. <b>{escape(ipo.name)}</b> — "
-                        f"<code>Rs {ipo.gmp:,.0f}</code>{percent}{close}{updated}"
+            for stock in losers[
+                :cls.MAX_LOSERS
+            ]:
+
+                lines.append(
+                    cls._stock_row(
+                        stock,
+                        direction="down",
                     )
-                lines.extend(("", "<i>GMP is informal, volatile, and not an official exchange price.</i>"))
-            ipo_start = next(
-                (index for index, line in enumerate(lines) if "CURRENT OPEN IPOs" in line),
-                None,
-            )
-            if ipo_start is None:
-                messages.append("\n".join(lines))
-            else:
-                messages.append("\n".join(lines[:ipo_start]))
-                messages.append("\n".join(lines[ipo_start:]))
+                )
 
-        return messages
-
-    @staticmethod
-    def format_window(brief: MorningBrief, window: str = "full") -> list[str]:
-        """Render one scheduled terminal window without duplicating a full brief."""
-        window = (window or "full").lower()
-        if window == "full":
-            return MorningFormatter.format(brief)
-        if window == "morning":
-            messages = [
-                "\n".join(MorningFormatter._premarket_message(brief)),
-                "\n".join(MorningFormatter._compact_news_message(brief.indian_news or brief.top_news, "TOP 5 STORIES DRIVING THE SESSION")),
-            ]
-            messages.extend(message for message in MorningFormatter.format(brief) if "CURRENT OPEN IPOs" in message)
-            return messages
-        if window == "afternoon":
-            full = MorningFormatter.format(brief)
-            panels = ["\n".join(MorningFormatter._postmarket_message(brief))]
-            panels.extend(message for message in full if "INSTITUTIONAL FLOWS" in message)
-            return panels
-        if window == "night":
-            return [
-                "\n".join(MorningFormatter._night_header(brief)),
-                "\n".join(MorningFormatter._compact_news_message(brief.global_impact_news, "GLOBAL MARKET NEWS", include_summary=False)),
-                "\n".join(MorningFormatter._external_markets_message(brief)),
-                "\n".join(MorningFormatter._us_movers_message(brief)),
-                "\n".join(MorningFormatter._compact_news_message(brief.crypto_news, "CRYPTO MARKET NEWS", include_summary=False)),
-            ]
-        raise ValueError(f"Unknown briefing window: {window}")
-
-    @staticmethod
-    def _premarket_message(brief: MorningBrief) -> list[str]:
-        health, health_icon = MorningFormatter._health_label(brief.health_score)
-        sentiment = brief.market_sentiment or "Neutral"
-        nifty = MorningFormatter._find_index(brief, "NIFTY")
-        gift = brief.gift_nifty or MorningFormatter._find_index(brief, "GIFT NIFTY")
-        levels = MorningFormatter._nifty_levels(nifty.value) if nifty else None
-        bank_nifty = MorningFormatter._find_index(brief, "BANKNIFTY")
-        bank_levels = MorningFormatter._banknifty_levels(bank_nifty.value) if bank_nifty else None
-        india_vix = MorningFormatter._find_index(brief, "VIX")
-        sensex = MorningFormatter._find_index(brief, "SENSEX")
-        us_indices = [item for item in brief.global_indices if item.name.upper() in {"NASDAQ", "S&P 500"}]
-        gift_line = MorningFormatter._market_row(gift) if gift else "• GIFT Nifty: <i>Live quote unavailable</i>"
-        if brief.fo_ban_symbols:
-            ban = ", ".join(brief.fo_ban_symbols)
-        elif brief.fo_ban_available:
-            ban = "None (NSE live list)"
-        else:
-            ban = "Live list temporarily unavailable"
-        lines = [
-            MorningFormatter.LINE,
-            "🇮🇳 <b>MARKET WAVES — MORNING PRE-MARKET BRIEF</b>",
-            MorningFormatter.LINE,
-            f"📅 {brief.generated_at:%d %b %Y} | ⏰ {brief.generated_at:%I:%M %p} IST",
-            "",
-            f"📊 <b>Market Health:</b> {health_icon} <code>{brief.health_score}/100</code> <b>{health}</b>",
-            f"🧠 <b>Sentiment:</b> {escape(sentiment)} ({brief.confidence}% confidence)",
-            "",
-            "🚨 <b>PRE-MARKET INDICATORS</b>",
-            MorningFormatter.LINE,
-            gift_line,
-            MorningFormatter._market_row(india_vix) if india_vix else "• India VIX: <i>Live quote unavailable</i>",
-            MorningFormatter._market_row(nifty) if nifty else "• Nifty 50: <i>Live quote unavailable</i>",
-            MorningFormatter._market_row(bank_nifty) if bank_nifty else "• Bank Nifty: <i>Live quote unavailable</i>",
-            MorningFormatter._market_row(sensex) if sensex else "• Sensex: <i>Live quote unavailable</i>",
-            *(MorningFormatter._quote_line(item, include_note=False) for item in us_indices),
-            f"• F&O Ban List: <code>{escape(ban)}</code>",
-            "",
-            "📈 <b>KEY NIFTY 50 LEVELS TO WATCH</b>",
-            MorningFormatter.LINE,
-            f"• Immediate Support: <code>{levels[0]:,.0f}</code>" if levels else "• Immediate Support: <i>Needs a live Nifty quote</i>",
-            f"• Immediate Resistance: <code>{levels[1]:,.0f}</code>" if levels else "• Immediate Resistance: <i>Needs a live Nifty quote</i>",
-            "",
-            "🏦 <b>KEY BANK NIFTY LEVELS TO WATCH</b>",
-            MorningFormatter.LINE,
-            f"• Immediate Support: <code>{bank_levels[0]:,.0f}</code>" if bank_levels else "• Immediate Support: <i>Needs a live Bank Nifty quote</i>",
-            f"• Immediate Resistance: <code>{bank_levels[1]:,.0f}</code>" if bank_levels else "• Immediate Resistance: <i>Needs a live Bank Nifty quote</i>",
-            "",
-            "<i>Levels are rule-based reference zones, not investment advice.</i>",
-        ]
-        return lines
-
-    @staticmethod
-    def _postmarket_message(brief: MorningBrief) -> list[str]:
-        lines = [MorningFormatter.LINE, "🇮🇳 <b>MARKET WAVES — POST-MARKET BRIEF</b>", MorningFormatter.LINE,
-                 f"📅 {brief.generated_at:%d %b %Y} | ⏰ {brief.generated_at:%I:%M %p} IST", "",
-                 "📊 <b>BENCHMARK CLOSING PRICES</b>", MorningFormatter.LINE]
-        lines.extend(MorningFormatter._market_row(index) for index in brief.indices)
-        lines.extend(("", "🔥 <b>SECTOR PERFORMANCE</b>", MorningFormatter.LINE))
-        lines.extend(MorningFormatter._sector_row(sector) for sector in brief.sectors)
-        lines.extend(("", "🟢 <b>TOP GAINERS</b>"))
-        lines.extend(MorningFormatter._stock_compact_row(stock, "up") for stock in brief.gainers[:5])
-        lines.extend(("", "🔴 <b>TOP LOSERS</b>"))
-        lines.extend(MorningFormatter._stock_compact_row(stock, "down") for stock in brief.losers[:5])
-        return lines
-
-    @staticmethod
-    def _night_header(brief: MorningBrief) -> list[str]:
-        return [MorningFormatter.LINE, "🌍 <b>MARKET WAVES — GLOBAL MARKETS & CRYPTO BRIEF</b>", MorningFormatter.LINE,
-                f"📅 {brief.generated_at:%d %b %Y} | ⏰ {brief.generated_at:%I:%M %p} IST"]
-
-    @staticmethod
-    def _compact_news_message(articles, title: str, include_summary: bool = True) -> list[str]:
-        lines = ["🔥 <b>" + title + "</b>", MorningFormatter.LINE, ""]
-        for number, article in enumerate(articles[:5], start=1):
-            score = max(0, min(100, int(article.score or article.impact or 0)))
-            source = escape((article.source or "Not supplied").strip())
-            if article.url:
-                source = f'<a href="{escape(article.url, quote=True)}">{source}</a>'
-            lines.append(f"<b>{number}. {escape(article.title or 'Market update')}</b>")
-            if include_summary:
-                summary = MorningFormatter._compact_summary(article)
-                if len(summary) > 240:
-                    summary = summary[:237].rsplit(" ", 1)[0] + "…"
-                lines.append(f"   • Summary: {escape(summary)}")
-            lines.extend((f"   • Source: {source}", ""))
-        return lines if len(lines) > 3 else lines + ["No major market-moving stories were verified."]
-
-    @staticmethod
-    def _find_index(brief: MorningBrief, name: str):
-        needle = name.upper()
-        return next((item for item in brief.indices if needle in item.name.upper()), None)
-
-    @staticmethod
-    def _nifty_levels(value: float) -> tuple[float, float]:
-        base = round(value / 50) * 50
-        return base - 100, base + 100
-
-    @staticmethod
-    def _banknifty_levels(value: float) -> tuple[float, float]:
-        base = round(value / 100) * 100
-        return base - 250, base + 250
-
-    # ==========================================================
-    # HELPERS
-    # ==========================================================
-
-    @staticmethod
-    def _india_news_message(brief: MorningBrief) -> list[str]:
-        sentiment = brief.market_sentiment or "Neutral"
-        sentiment_icon = MorningFormatter._sentiment_emoji(sentiment)
-        sentiment_animal = MorningFormatter._sentiment_animal(sentiment)
-        health_label, health_icon = MorningFormatter._health_label(brief.health_score)
-        lines = [
-            "━━━━━━━━━━━━━━━━━━━━",
-            "🇮🇳 <b>MARKET WAVES — INDIA MORNING BRIEF</b>",
-            "━━━━━━━━━━━━━━━━━━━━",
-            f"📅 {brief.generated_at:%d %b %Y} | ⏰ {brief.generated_at:%I:%M %p} IST",
-            "",
-            f"🩺 <b>Market Health:</b> {health_icon} <code>{brief.health_score}/100</code> <b>{health_label}</b>",
-            f"{sentiment_animal} <b>Sentiment:</b> {escape(sentiment)} ({brief.confidence}% confidence) {sentiment_icon}",
-            "",
-            "📰 <b>TOP 5 THINGS TODAY</b>",
-            "━━━━━━━━━━━━━━━━━━━━",
-            "",
-        ]
-        articles = brief.indian_news or brief.top_news
-        if not articles:
-            return lines + ["No major Indian market-moving events were verified in this run."]
-        for number, article in enumerate(articles[:5], start=1):
-            lines.extend(MorningFormatter._news_card_lines(number, article))
-        return lines
-
-    @staticmethod
-    def _global_news_message(brief: MorningBrief) -> list[str]:
-        return MorningFormatter._compact_news_message(
-            brief.global_impact_news,
-            "GLOBAL MARKET NEWS",
-            include_summary=False,
-        )
-
-        # Legacy detailed renderer retained below for reference.
-        lines = [
-            "━━━━━━━━━━━━━━━━━━━━",
-            "🌍 <b>GLOBAL MARKET NEWS</b>",
-            "━━━━━━━━━━━━━━━━━━━━",
-            "",
-        ]
-        for number, article in enumerate(brief.global_impact_news[:5], start=1):
-            lines.extend(MorningFormatter._news_card_lines(number, article))
-        if not brief.global_impact_news:
-            lines.append("No fresh high-priority global market stories were available from the configured sources in this run.")
-        return lines
-
-    @staticmethod
-    def _crypto_news_message(brief: MorningBrief) -> list[str]:
-        return MorningFormatter._compact_news_message(
-            brief.crypto_news,
-            "CRYPTO MARKET NEWS",
-            include_summary=False,
-        )
-
-        # Legacy detailed renderer retained below for reference.
-        lines = ["━━━━━━━━━━━━━━━━━━━━", "🪙 <b>CRYPTO MARKET NEWS</b>", "━━━━━━━━━━━━━━━━━━━━", ""]
-        if not brief.crypto_news:
-            return lines + ["No high-priority crypto market event was verified in this run."]
-        for number, article in enumerate(brief.crypto_news[:5], start=1):
-            lines.extend(MorningFormatter._news_card_lines(number, article))
-        return lines
-
-    @staticmethod
-    def _external_markets_message(brief: MorningBrief) -> list[str]:
-        lines = ["━━━━━━━━━━━━━━━━━━━━", "🌍 <b>GLOBAL INDICES</b>", "━━━━━━━━━━━━━━━━━━━━"]
-        lines.extend(MorningFormatter._quote_line(item) for item in brief.global_indices)
-        if not brief.global_indices:
-            lines.append("Live global index quotes unavailable in this run.")
-        lines.extend(("", "━━━━━━━━━━━━━━━━━━━━", "🛢 <b>COMMODITIES</b>", "━━━━━━━━━━━━━━━━━━━━"))
-        lines.extend(MorningFormatter._quote_line(item, include_note=False) for item in brief.commodities)
-        lines.extend(("", "━━━━━━━━━━━━━━━━━━━━", "🪙 <b>CRYPTO MARKETS</b>", "━━━━━━━━━━━━━━━━━━━━"))
-        lines.extend(MorningFormatter._quote_line(item, include_note=False) for item in brief.crypto)
-        if not brief.commodities and not brief.crypto:
-            lines.append("Live commodity and crypto quotes unavailable in this run.")
-        return lines
-
-    @staticmethod
-    def _us_movers_message(brief: MorningBrief) -> list[str]:
-        lines = [MorningFormatter.LINE, "🇺🇸 <b>US MARKET TOP MOVERS</b>", MorningFormatter.LINE]
-        if brief.us_gainers:
-            lines.extend(("", "🟢 <b>TOP GAINERS</b>"))
-            lines.extend(MorningFormatter._us_mover_row(item, "up") for item in brief.us_gainers[:5])
-        if brief.us_losers:
-            lines.extend(("", "🔴 <b>TOP LOSERS</b>"))
-            lines.extend(MorningFormatter._us_mover_row(item, "down") for item in brief.us_losers[:5])
-        if not brief.us_gainers and not brief.us_losers:
-            lines.append("Live US mover data unavailable in this run.")
-        return lines
-
-    @staticmethod
-    def _us_mover_row(quote, direction: str) -> str:
-        icon = "📈" if direction == "up" else "📉"
-        arrow = "▲" if direction == "up" else "▼"
-        return f"{icon} <b>{escape(quote.name)}</b> = ${quote.value:,.2f} ({arrow} {abs(quote.percent_change):.2f}%)"
-
-    @staticmethod
-    def _quote_line(quote, include_note: bool = True) -> str:
-        direction = "▲" if quote.percent_change >= 0 else "▼"
-        icon = "🟢" if quote.percent_change > 0.15 else "🔴" if quote.percent_change < -0.15 else "🟡"
-        value = f"₹{quote.value:,.0f}" if quote.unit.startswith("₹") else f"${quote.value:,.2f}" if quote.unit == "$" else f"{quote.value:,.2f}"
-        suffix = f" {quote.unit}" if quote.unit and not quote.unit.startswith(("₹", "$")) else ""
-        name_map = {
-            "Gold 24K INDIA": "Gold IND (24K)",
-            "Silver INDIA": "Silver IND",
-            "Gold (COMEX INR equiv.)": "Gold US",
-            "Silver (COMEX INR equiv.)": "Silver US",
-        }
-        name = name_map.get(quote.name, quote.name)
-        note = f" <i>({escape(quote.note)})</i>" if include_note and quote.note else ""
-        return f"{icon}<b>{escape(name)}</b> : {value}{suffix} ({direction}{quote.percent_change:+.2f}%){note}"
-
-    @staticmethod
-    def _compact_summary(article) -> str:
-        """Keep a compact card useful when a feed repeats its own headline."""
-        title = " ".join((article.title or "").split()).lower()
-        summary = " ".join((article.summary or "").split())
-        lowered = summary.lower()
-        if title and lowered.startswith(title):
-            summary = summary[len(article.title or ""):].lstrip(" -:|–—.")
-        if not summary or summary.lower() == title:
-            return "No additional publisher summary was supplied."
-        return summary
-
-    @staticmethod
-    def _ipo_type(value: str) -> str:
-        text = " ".join((value or "").split()).upper()
-        if "SME" in text:
-            return "SME IPO"
-        if "MAIN" in text:
-            return "Mainboard IPO"
-        return "IPO (classification not published)"
-
-    @staticmethod
-    def _news_card_lines(number: int, article) -> list[str]:
-        summary = MorningFormatter._compact_summary(article)
-        if len(summary) > 360:
-            summary = f"{summary[:357].rsplit(' ', 1)[0]}…"
-        title = escape(article.title or "Market update")
-        source = escape((article.source or "Source not supplied").strip())
-        if article.url:
-            source = f'<a href="{escape(article.url, quote=True)}">{source}</a>'
-        lines = [
-            f"<b>{number}. {title}</b>",
-            f"   • Summary: {escape(summary)}",
-            f"   • Source: {source}",
-        ]
-        lines.append("")
-        return lines
-
-    @staticmethod
-    def _health_label(score: int) -> tuple[str, str]:
-        if score >= 70:
-            return "GOOD", "🟢"
-        if score >= 40:
-            return "CAUTION", "🟡"
-        return "POOR", "🔴"
-
-    @staticmethod
-    def _impact_label(score: int) -> tuple[str, str]:
-        if score >= 80:
-            return "HIGH", "🔴"
-        if score >= 55:
-            return "MEDIUM", "🟡"
-        return "LOW", "⚪"
-
-    @staticmethod
-    def _institutional_ledger(
-        label: str,
-        buy: float | None,
-        sell: float | None,
-        net: float | None,
-    ) -> list[str]:
-        if net is None:
-            return [f"<b>{label} ACTIVITY</b>", "Data: <code>Not available from NSE</code>"]
-        direction_icon = "🟢" if net >= 0 else "🔴"
-        buy_text = f"Rs {buy:,.2f} Cr" if buy is not None else "Not published"
-        sell_text = f"Rs {sell:,.2f} Cr" if sell is not None else "Not published"
-        return [
-            f"<b>{label} ACTIVITY</b>",
-            f"Gross Buy  : <code>{buy_text}</code>",
-            f"Gross Sell : <code>{sell_text}</code>",
-            f"Net Flow   : {direction_icon} <code>{net:+,.2f} Cr ₹</code>",
-        ]
-
-    @staticmethod
-    def _flow_row(
-        label: str,
-        buy: float | None,
-        sell: float | None,
-        net: float | None,
-    ) -> str:
-        if net is None:
-            return f"{label:<8}: <code>Not available</code>"
-        direction = "NET BUYING" if net >= 0 else "NET SELLING"
-        gross = (
-            f" | Buy Rs {buy:,.0f} cr | Sell Rs {sell:,.0f} cr"
-            if buy is not None and sell is not None else ""
-        )
-        return f"{label:<8}: <code>Rs {abs(net):,.0f} cr</code> <b>{direction}</b>{gross}"
-
-    @staticmethod
-    def _sentiment_emoji(
-        value: str,
-    ) -> str:
-
-        value = (
-            value
-            or ""
-        ).strip().lower()
-
-        if value == "bullish":
-            return "🟢"
-
-        if value == "bearish":
-            return "🔴"
-
-        return "🟡"
-
-    @staticmethod
-    def _sentiment_animal(value: str) -> str:
-        value = (value or "").strip().lower()
-        if value == "bullish":
-            return "🐂"
-        if value == "bearish":
-            return "🐻"
-        return "🧭"
+        return "\n".join(lines)
 
     # ==========================================================
     # MARKET ROW
     # ==========================================================
 
     @staticmethod
-    def _market_row(index) -> str:
+    def _market_row(
+        index: Any,
+    ) -> str:
+        """Format one market index."""
 
-        change = index.percent_change
+        change = MorningFormatter._safe_number(
+            getattr(
+                index,
+                "percent_change",
+                0,
+            )
+        )
+
+        value = MorningFormatter._safe_number(
+            getattr(
+                index,
+                "value",
+                0,
+            )
+        )
+
+        raw_name = (
+            getattr(
+                index,
+                "name",
+                None,
+            )
+            or "INDEX"
+        )
+
+        name = MorningFormatter._short_index_name(
+            str(raw_name)
+        )
 
         if change >= 0:
 
@@ -1183,16 +833,9 @@ class MorningFormatter:
             icon = "📉"
             arrow = "▼"
 
-        name = (
-            MorningFormatter._short_index_name(
-                index.name
-            )
-        )
-
         return (
-            f"{icon} "
-            f"<b>{escape(name)}</b> : "
-            f"<code>{index.value:,.2f}</code> "
+            f"{icon} <b>{escape(name)}</b> : "
+            f"<code>{value:,.2f}</code> "
             f"({arrow} {abs(change):.2f}%)"
         )
 
@@ -1201,27 +844,33 @@ class MorningFormatter:
     # ==========================================================
 
     @staticmethod
-    def _sector_row(sector) -> str:
+    def _sector_row(
+        sector: Any,
+    ) -> str:
+        """Format one sector."""
 
-        change = sector.percent_change
-
-        if change >= 0:
-
-            arrow = "▲"
-
-        else:
-
-            arrow = "▼"
-
-        name = (
-            MorningFormatter._short_sector_name(
-                sector.name
+        change = MorningFormatter._safe_number(
+            getattr(
+                sector,
+                "percent_change",
+                0,
             )
         )
 
-        # ------------------------------------------------------
-        # Visual spacing
-        # ------------------------------------------------------
+        raw_name = (
+            getattr(
+                sector,
+                "name",
+                None,
+            )
+            or "Sector"
+        )
+
+        name = MorningFormatter._short_sector_name(
+            str(raw_name)
+        )
+
+        arrow = "▲" if change >= 0 else "▼"
 
         dots = "." * max(
             5,
@@ -1240,15 +889,39 @@ class MorningFormatter:
 
     @staticmethod
     def _stock_row(
-        stock,
+        stock: Any,
         direction: str,
     ) -> str:
+        """Format one stock mover."""
 
-        return MorningFormatter._stock_compact_row(stock, direction)
+        change = MorningFormatter._safe_number(
+            getattr(
+                stock,
+                "percent_change",
+                0,
+            )
+        )
 
-        # Legacy detailed renderer retained below for reference.
+        value = MorningFormatter._safe_number(
+            getattr(
+                stock,
+                "value",
+                0,
+            )
+        )
 
-        change = stock.percent_change
+        raw_name = (
+            getattr(
+                stock,
+                "name",
+                None,
+            )
+            or "STOCK"
+        )
+
+        name = MorningFormatter._short_stock_name(
+            str(raw_name)
+        )
 
         if direction == "up":
 
@@ -1260,36 +933,350 @@ class MorningFormatter:
             icon = "📉"
             arrow = "▼"
 
-        name = (
-            MorningFormatter._short_stock_name(
-                stock.name
-            )
-        )
-
-        # ------------------------------------------------------
-        # Keep stock names aligned
-        # ------------------------------------------------------
-
-        name_display = (
-            f"{name:<10}"
-        )
-
         return (
-            f"{icon} "
-            f"<b>{escape(name_display)}</b>"
-            f" | "
-            f"<code>₹{stock.value:,.2f}</code> "
+            f"{icon} <b>{escape(name)}</b>"
+            f" | <code>₹{value:,.2f}</code> "
             f"({arrow} {abs(change):.2f}%)"
         )
 
+    # ==========================================================
+    # NEWS SELECTION
+    # ==========================================================
+
+    @classmethod
+    def _select_unique_news(
+        cls,
+        articles: list[Any],
+        limit: int,
+    ) -> list[Any]:
+        """
+        Remove duplicate news articles.
+
+        Deduplication is based on:
+            1. URL
+            2. normalized title
+        """
+
+        selected: list[Any] = []
+
+        seen_urls: set[str] = set()
+        seen_titles: set[str] = set()
+
+        for article in articles:
+
+            url = (
+                getattr(
+                    article,
+                    "url",
+                    None,
+                )
+                or ""
+            ).strip().lower()
+
+            title = (
+                getattr(
+                    article,
+                    "title",
+                    None,
+                )
+                or ""
+            ).strip().lower()
+
+            normalized_title = " ".join(
+                title.split()
+            )
+
+            if url and url in seen_urls:
+                continue
+
+            if (
+                normalized_title
+                and normalized_title in seen_titles
+            ):
+                continue
+
+            if url:
+                seen_urls.add(url)
+
+            if normalized_title:
+                seen_titles.add(
+                    normalized_title
+                )
+
+            selected.append(article)
+
+            if len(selected) >= limit:
+                break
+
+        return selected
+
+    # ==========================================================
+    # TEXT HELPERS
+    # ==========================================================
+
     @staticmethod
-    def _stock_compact_row(stock, direction: str) -> str:
-        """A proportional-monospace-safe mover row for Telegram clients."""
-        change = stock.percent_change
-        icon = "📈" if direction == "up" else "📉"
-        arrow = "▲" if direction == "up" else "▼"
-        name = MorningFormatter._short_stock_name(stock.name)
-        return f"{icon} <b>{escape(name)}</b> = ₹{stock.value:,.2f} ({arrow} {abs(change):.2f}%)"
+    def _clean_summary(
+        summary: str,
+    ) -> str:
+        """Clean RSS summary text."""
+
+        summary = summary.strip()
+
+        # Remove simple HTML tags from RSS descriptions.
+        import re
+
+        summary = re.sub(
+            r"<[^>]+>",
+            " ",
+            summary,
+        )
+
+        summary = re.sub(
+            r"\s+",
+            " ",
+            summary,
+        )
+
+        return summary.strip()
+
+    @staticmethod
+    def _truncate(
+        text: str,
+        maximum: int,
+    ) -> str:
+        """Safely truncate text."""
+
+        if len(text) <= maximum:
+            return text
+
+        return (
+            text[: maximum - 1].rstrip()
+            + "…"
+        )
+
+    @staticmethod
+    def _format_list(
+        values: Any,
+        limit: int,
+    ) -> str:
+        """Format list-like metadata."""
+
+        if not values:
+            return ""
+
+        if isinstance(
+            values,
+            str,
+        ):
+            return values
+
+        result: list[str] = []
+
+        for value in values[:limit]:
+
+            text = MorningFormatter._enum_text(
+                value
+            )
+
+            if text:
+                result.append(text)
+
+        return ", ".join(result)
+
+    @staticmethod
+    def _enum_text(
+        value: Any,
+    ) -> str:
+        """Convert enums / values to display text."""
+
+        if value is None:
+            return ""
+
+        raw = getattr(
+            value,
+            "value",
+            value,
+        )
+
+        return str(raw).replace(
+            "_",
+            " ",
+        ).strip()
+
+    @staticmethod
+    def _safe_number(
+        value: Any,
+    ) -> float:
+        """Safely convert a value to float."""
+
+        try:
+            return float(value or 0)
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+            return 0.0
+
+    @staticmethod
+    def _fit_telegram_limit(
+        message: str,
+    ) -> str:
+        """Prevent Telegram message overflow."""
+
+        if len(message) <= MorningFormatter.TELEGRAM_MAX_LENGTH:
+            return message
+
+        return (
+            message[
+                :MorningFormatter.TELEGRAM_MAX_LENGTH
+                - 30
+            ].rstrip()
+            + "\n\n<i>Message truncated.</i>"
+        )
+
+    # ==========================================================
+    # SENTIMENT
+    # ==========================================================
+
+    @staticmethod
+    def _sentiment_emoji(
+        value: str,
+    ) -> str:
+
+        value = (
+            value
+            or ""
+        ).strip().lower()
+
+        if value in {
+            "bullish",
+            "strong bullish",
+            "very bullish",
+        }:
+            return "🟢"
+
+        if value in {
+            "bearish",
+            "strong bearish",
+            "very bearish",
+        }:
+            return "🔴"
+
+        return "🟡"
+
+    # ==========================================================
+    # HEALTH
+    # ==========================================================
+
+    @staticmethod
+    def _health_emoji(
+        score: float,
+    ) -> str:
+
+        if score >= 65:
+            return "🟢"
+
+        if score >= 45:
+            return "🟡"
+
+        if score >= 30:
+            return "🟠"
+
+        return "🔴"
+
+    @staticmethod
+    def _health_label(
+        score: float,
+    ) -> str:
+
+        if score >= 80:
+            return "EXCELLENT"
+
+        if score >= 65:
+            return "HEALTHY"
+
+        if score >= 50:
+            return "NEUTRAL"
+
+        if score >= 35:
+            return "WEAK"
+
+        return "POOR"
+
+    # ==========================================================
+    # NEWS SCORE
+    # ==========================================================
+
+    @staticmethod
+    def _score_label(
+        score: float,
+    ) -> str:
+
+        if score >= 90:
+            return "🚨 EXCEPTIONAL"
+
+        if score >= 80:
+            return "🔥 VERY HIGH"
+
+        if score >= 70:
+            return "⚡ HIGH"
+
+        if score >= 55:
+            return "🟡 MEDIUM"
+
+        return "⚪ LOW"
+
+    @staticmethod
+    def _news_severity(
+        score: float,
+        impact: float,
+        importance: float,
+    ) -> str:
+        """
+        Select visual severity based on the strongest
+        available intelligence score.
+        """
+
+        effective_score = max(
+            score,
+            impact,
+            importance,
+        )
+
+        if effective_score >= 85:
+            return "🚨"
+
+        if effective_score >= 70:
+            return "⚡"
+
+        if effective_score >= 50:
+            return "📌"
+
+        return "📰"
+
+    # ==========================================================
+    # DATETIME
+    # ==========================================================
+
+    @staticmethod
+    def _format_datetime(
+        value: Any,
+    ) -> str:
+        """Format publication timestamp."""
+
+        try:
+
+            return value.strftime(
+                "%d %b %Y | %I:%M %p IST"
+            )
+
+        except (
+            AttributeError,
+            ValueError,
+        ):
+
+            return str(value)
 
     # ==========================================================
     # SHORT INDEX NAMES
@@ -1301,29 +1288,17 @@ class MorningFormatter:
     ) -> str:
 
         mapping = {
-
-            "NIFTY 50": "Nifty 50",
-            "NIFTY": "Nifty 50",
-
+            "NIFTY 50": "NIFTY",
+            "NIFTY": "NIFTY",
             "NIFTY BANK": "BANKNIFTY",
             "BANKNIFTY": "BANKNIFTY",
-
-            "NIFTY FIN SERVICE": "FINNIFTY",
             "NIFTY FIN SERVICE": "FINNIFTY",
             "FINNIFTY": "FINNIFTY",
-
-            "NIFTY MIDCAP SELECT": "Midcap 50",
-            "Nifty Midcap 50": "Midcap 50",
-            "NIFTY MIDCAP 50": "Midcap 50",
-
-            "NIFTY IT": "Nifty IT",
-            "Nifty IT": "Nifty IT",
-
-            "NIFTY PHARMA": "Nifty Pharma",
-            "Nifty Pharma": "Nifty Pharma",
-
-            "INDIA VIX": "India VIX",
-            "INDIA VIX ": "India VIX",
+            "NIFTY MIDCAP SELECT": "MIDCAP",
+            "NIFTY MIDCAP 50": "MIDCAP",
+            "NIFTY IT": "NIFTY IT",
+            "NIFTY PHARMA": "NIFTY PHARMA",
+            "INDIA VIX": "INDIA VIX",
         }
 
         cleaned = (
@@ -1346,31 +1321,22 @@ class MorningFormatter:
     ) -> str:
 
         mapping = {
-
             "Nifty Pharma": "Pharma",
             "NIFTY PHARMA": "Pharma",
-
             "Nifty PSU Bank": "PSU Bank",
             "NIFTY PSU BANK": "PSU Bank",
-
             "Nifty Metal": "Metal",
             "NIFTY METAL": "Metal",
-
             "Nifty Media": "Media",
             "NIFTY MEDIA": "Media",
-
             "Nifty Energy": "Energy",
             "NIFTY ENERGY": "Energy",
-
             "Nifty FMCG": "FMCG",
             "NIFTY FMCG": "FMCG",
-
             "Nifty Auto": "Auto",
             "NIFTY AUTO": "Auto",
-
             "Nifty Realty": "Realty",
             "NIFTY REALTY": "Realty",
-
             "Nifty IT": "IT",
             "NIFTY IT": "IT",
         }
@@ -1405,52 +1371,25 @@ class MorningFormatter:
             or ""
         ).strip()
 
-        # ------------------------------------------------------
-        # Common long names -> compact trading names
-        # ------------------------------------------------------
-
         mapping = {
-
             "GODREJ CONSUMER": "GODREJCP",
             "GODREJ CONSUMER PRODUCTS": "GODREJCP",
-
-            "PIRAMAL ENTERPRISES": "PIIND",
-
+            "PIRAMAL ENTERPRISES": "PIRAMAL",
             "FORTIS HEALTHCARE": "FORTIS",
-
             "TATA CONSULTANCY SERVICES": "TCS",
-
             "MAX HEALTHCARE": "MAXHEALTH",
-
             "BSE LIMITED": "BSE",
-
             "UNO MINDA": "UNOMINDA",
-
-            "LARSEN & TOUBRO": "LTM",
-
+            "LARSEN & TOUBRO": "LT",
             "KPIT TECHNOLOGIES": "KPITTECH",
-
             "POWER INDIA": "POWERINDIA",
-
             "NATIONAL ALUMINIUM": "NATIONALUM",
-
-            "IDEA": "IDEA",
-
             "BHARAT HEAVY ELECTRICALS": "BHEL",
-
             "INDUS TOWERS": "INDUSTOWER",
-
             "KAYNES TECHNOLOGY": "KAYNES",
-
-            "BOSCH": "BOSCHLTD",
         }
 
         if cleaned in mapping:
-
             return mapping[cleaned]
-
-        # ------------------------------------------------------
-        # Don't allow extremely long names
-        # ------------------------------------------------------
 
         return cleaned[:12]

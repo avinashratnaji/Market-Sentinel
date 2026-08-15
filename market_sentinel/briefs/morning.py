@@ -59,24 +59,47 @@ from market_sentinel.providers.news.news_ranker import (
     NewsRanker,
 )
 
-from market_sentinel.providers.news.global_impact_news import (
-    GlobalImpactNews,
-)
-from market_sentinel.providers.news.crypto_market_news import CryptoMarketNews
-from market_sentinel.providers.external_markets import ExternalMarketsProvider
-from market_sentinel.providers.nse_movers import NseMoversProvider
-from market_sentinel.providers.premarket import PreMarketProvider
-from market_sentinel.providers.sensex import SensexProvider
-from market_sentinel.providers.us_movers import UsMarketMoversProvider
 
-from market_sentinel.providers.market_brief_data import (
-    InstitutionalFlowProvider,
-    IpoGmpProvider,
-)
+class MorningBriefBuilder:
+    """
+    Builds the complete Market Sentinel morning brief.
 
-from market_sentinel.briefs.ai_summary import (
-    MarketSummaryGenerator,
-)
+    Architecture
+    ------------
+
+        Market Providers
+              │
+              ├── Indices
+              ├── Sectors
+              ├── Gainers
+              └── Losers
+              │
+              ▼
+        Indian News Collector
+              │
+              ▼
+        News Ranking
+              │
+              ▼
+        News Deduplication
+              │
+              ▼
+        News Diversification
+              │
+              ▼
+        Top News Selection
+              │
+              ▼
+        MorningBrief
+              │
+              ▼
+        MarketHealthEngine
+              │
+              ▼
+        Telegram Formatter
+    """
+
+    VERSION = "3.0.0"
 
     # ==========================================================
     # CONFIGURATION
@@ -135,26 +158,21 @@ from market_sentinel.briefs.ai_summary import (
 
         self.health = MarketHealthEngine()
 
-        # The briefing feed must be India-first.  The collector removes
-        # irrelevant global/personal-finance stories; NewsRanker then scores,
-        # clusters and diversifies the final event-level selection.
+        # ------------------------------------------------------
+        # India-first news pipeline
+        # ------------------------------------------------------
+
         self.news = IndianMarketNews()
 
         self.news_ranker = NewsRanker()
 
-        self.global_news = GlobalImpactNews()
-        self.crypto_news = CryptoMarketNews()
-        self.external_markets = ExternalMarketsProvider()
-        self.nse_movers = NseMoversProvider()
-        self.premarket = PreMarketProvider()
-        self.sensex = SensexProvider()
-        self.us_movers = UsMarketMoversProvider()
+        logger.info(
+            "MorningBriefBuilder initialized successfully."
+        )
 
-        self.institutional_flows = InstitutionalFlowProvider()
-
-        self.ipo_gmp = IpoGmpProvider()
-
-        self.summary_generator = MarketSummaryGenerator()
+    # ==========================================================
+    # PUBLIC API
+    # ==========================================================
 
     def build(self) -> MorningBrief:
         """
@@ -232,9 +250,9 @@ from market_sentinel.briefs.ai_summary import (
 
             sectors=sectors,
 
-            gainers=self.nse_movers.fetch("gainers") or self.gainers.fetch(),
+            gainers=gainers,
 
-            losers=self.nse_movers.fetch("losers") or self.losers.fetch(),
+            losers=losers,
         )
 
         # ------------------------------------------------------
@@ -506,41 +524,585 @@ from market_sentinel.briefs.ai_summary import (
                 reverse=True,
             )
 
-        brief.indian_news = self.news_ranker.rank(
-            self.news.collect(),
-            limit=5,
+    # ==========================================================
+    # NEWS VALIDATION
+    # ==========================================================
+
+    @staticmethod
+    def _is_valid_article(
+        article: Any,
+    ) -> bool:
+        """
+        Validate the minimum structure required for a news article.
+        """
+
+        if article is None:
+            return False
+
+        title = MorningBriefBuilder._article_title(
+            article
         )
 
-        # Backwards compatibility for existing consumers that read top_news.
-        brief.top_news = brief.indian_news
-
-        brief.global_impact_news = self.global_news.collect(limit=5)
-        brief.crypto_news = self.crypto_news.collect(limit=5)
-        (
-            brief.global_indices,
-            brief.indian_adrs,
-            brief.commodities,
-            brief.crypto,
-        ) = self.external_markets.fetch()
-        brief.us_gainers = self.us_movers.fetch("gainers")
-        brief.us_losers = self.us_movers.fetch("losers")
-
-        brief.investor_flows = self.institutional_flows.fetch()
-
-        brief.top_ipos = self.ipo_gmp.fetch_top(limit=10)
-        brief.fo_ban_symbols = self.premarket.fetch_fo_ban()
-        brief.fo_ban_available = self.premarket.fo_ban_available
-        brief.gift_nifty = self.premarket.fetch_gift_nifty()
-
-        if not any(item.name.upper() == "SENSEX" for item in brief.indices):
-            sensex = self.sensex.fetch()
-            if sensex:
-                brief.indices.insert(1, sensex)
-
-        brief.ai_summary, brief.ai_summary_source = (
-            self.summary_generator.generate(brief)
+        url = MorningBriefBuilder._article_url(
+            article
         )
 
-        return self.health.calculate(
-            brief,
+        # A news item without a title is not useful.
+        if not title:
+            return False
+
+        # URL is strongly preferred.
+        #
+        # Some official feeds can occasionally omit it, so we
+        # don't reject the article purely for that reason.
+        if not url:
+            source = MorningBriefBuilder._article_source(
+                article
+            )
+
+            if not source:
+                return False
+
+        return True
+
+    # ==========================================================
+    # FRESHNESS
+    # ==========================================================
+
+    def _filter_fresh_news(
+        self,
+        articles: list[Any],
+    ) -> list[Any]:
+        """
+        Remove stale articles.
+
+        Articles without a publication timestamp are retained
+        because some RSS feeds do not expose a valid date.
+        """
+
+        now = datetime.now(
+            timezone.utc
         )
+
+        cutoff = (
+            now
+            - timedelta(
+                hours=self.NEWS_MAX_AGE_HOURS
+            )
+        )
+
+        fresh: list[Any] = []
+
+        for article in articles:
+            published_at = self._article_datetime(
+                article
+            )
+
+            if published_at is None:
+                fresh.append(article)
+                continue
+
+            if published_at >= cutoff:
+                fresh.append(article)
+
+        return fresh
+
+    # ==========================================================
+    # DEDUPLICATION
+    # ==========================================================
+
+    def _deduplicate_news(
+        self,
+        articles: list[Any],
+    ) -> list[Any]:
+        """
+        Deduplicate news using:
+
+            1. URL
+            2. normalized title
+            3. title similarity heuristic
+
+        The highest-ranked / first article is retained.
+        """
+
+        unique: list[Any] = []
+
+        seen_urls: set[str] = set()
+        seen_titles: set[str] = set()
+
+        for article in articles:
+            url = self._normalize_url(
+                self._article_url(article)
+            )
+
+            title = self._normalize_title(
+                self._article_title(article)
+            )
+
+            # --------------------------------------------------
+            # URL duplicate
+            # --------------------------------------------------
+
+            if url and url in seen_urls:
+                continue
+
+            # --------------------------------------------------
+            # Exact title duplicate
+            # --------------------------------------------------
+
+            if title and title in seen_titles:
+                continue
+
+            if url:
+                seen_urls.add(url)
+
+            if title:
+                seen_titles.add(title)
+
+            unique.append(article)
+
+        return unique
+
+    # ==========================================================
+    # DIVERSIFICATION
+    # ==========================================================
+
+    def _diversify_news(
+        self,
+        articles: list[Any],
+    ) -> list[Any]:
+        """
+        Prevent the TOP NEWS section from being dominated by one
+        source.
+
+        Ranking remains primary.
+
+        Source diversity is only a secondary constraint.
+        """
+
+        selected: list[Any] = []
+
+        source_counts: dict[str, int] = {}
+
+        # ------------------------------------------------------
+        # First pass:
+        # Respect source diversity.
+        # ------------------------------------------------------
+
+        for article in articles:
+            source = self._normalize_source(
+                self._article_source(article)
+            )
+
+            count = source_counts.get(
+                source,
+                0,
+            )
+
+            if (
+                source
+                and count >= self.SOURCE_DIVERSITY_LIMIT
+            ):
+                continue
+
+            selected.append(article)
+
+            if source:
+                source_counts[source] = (
+                    count + 1
+                )
+
+            if len(selected) >= self.NEWS_LIMIT:
+                break
+
+        # ------------------------------------------------------
+        # Second pass:
+        # If diversity caused too few articles, fill remaining
+        # slots using the original ranking.
+        # ------------------------------------------------------
+
+        if len(selected) < self.NEWS_LIMIT:
+
+            selected_ids = {
+                id(article)
+                for article in selected
+            }
+
+            for article in articles:
+                if id(article) in selected_ids:
+                    continue
+
+                selected.append(article)
+
+                if len(selected) >= self.NEWS_LIMIT:
+                    break
+
+        return selected
+
+    # ==========================================================
+    # HEALTH
+    # ==========================================================
+
+    def _calculate_health(
+        self,
+        brief: MorningBrief,
+    ) -> MorningBrief:
+        """
+        Calculate market health.
+
+        MarketHealthEngine remains the authoritative owner of
+        health calculation.
+        """
+
+        try:
+            result = self.health.calculate(
+                brief
+            )
+
+            if result is None:
+                logger.warning(
+                    "MarketHealthEngine returned None."
+                )
+
+                return brief
+
+            return result
+
+        except Exception as exc:
+            logger.exception(
+                "Market health calculation failed: {}",
+                exc,
+            )
+
+            return brief
+
+    # ==========================================================
+    # GENERIC PROVIDER HELPER
+    # ==========================================================
+
+    @staticmethod
+    def _safe_fetch(
+        name: str,
+        provider: Any,
+        fallback: Any,
+    ) -> Any:
+        """
+        Safely execute a provider's fetch() method.
+
+        This prevents a single market-data provider failure from
+        breaking the entire morning brief.
+        """
+
+        started_at = perf_counter()
+
+        try:
+            fetch_method = getattr(
+                provider,
+                "fetch",
+            )
+
+            result = fetch_method()
+
+            elapsed = (
+                perf_counter() - started_at
+            )
+
+            if result is None:
+                logger.warning(
+                    "{} provider returned no data "
+                    "after {:.2f}s",
+                    name,
+                    elapsed,
+                )
+
+                return fallback
+
+            logger.info(
+                "{} collected successfully "
+                "in {:.2f}s",
+                name,
+                elapsed,
+            )
+
+            return result
+
+        except Exception as exc:
+            elapsed = (
+                perf_counter() - started_at
+            )
+
+            logger.exception(
+                "{} provider failed after {:.2f}s: {}",
+                name,
+                elapsed,
+                exc,
+            )
+
+            return fallback
+
+    # ==========================================================
+    # ARTICLE ACCESSORS
+    # ==========================================================
+
+    @staticmethod
+    def _article_title(
+        article: Any,
+    ) -> str:
+        return str(
+            getattr(
+                article,
+                "title",
+                "",
+            ) or ""
+        ).strip()
+
+    @staticmethod
+    def _article_url(
+        article: Any,
+    ) -> str:
+        return str(
+            getattr(
+                article,
+                "url",
+                "",
+            ) or ""
+        ).strip()
+
+    @staticmethod
+    def _article_source(
+        article: Any,
+    ) -> str:
+        return str(
+            getattr(
+                article,
+                "source",
+                "",
+            ) or ""
+        ).strip()
+
+    @staticmethod
+    def _article_score(
+        article: Any,
+    ) -> int:
+        """
+        Read the ranking score.
+
+        Supports both:
+
+            article.score
+
+        and legacy:
+
+            article.impact
+        """
+
+        value = getattr(
+            article,
+            "score",
+            None,
+        )
+
+        if value is None:
+            value = getattr(
+                article,
+                "impact",
+                0,
+            )
+
+        try:
+            return int(
+                float(value or 0)
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+            return 0
+
+    @staticmethod
+    def _article_datetime(
+        article: Any,
+    ) -> datetime | None:
+        """
+        Safely extract article publication datetime.
+
+        Naive timestamps are interpreted as UTC because the
+        collector normalizes feed timestamps to timezone-aware
+        values.
+        """
+
+        value = getattr(
+            article,
+            "published_at",
+            None,
+        )
+
+        if value is None:
+            return None
+
+        if isinstance(
+            value,
+            datetime,
+        ):
+            if value.tzinfo is None:
+                return value.replace(
+                    tzinfo=timezone.utc
+                )
+
+            return value.astimezone(
+                timezone.utc
+            )
+
+        return None
+
+    # ==========================================================
+    # NORMALIZATION
+    # ==========================================================
+
+    @staticmethod
+    def _normalize_url(
+        url: str,
+    ) -> str:
+        """
+        Normalize URLs for duplicate detection.
+        """
+
+        if not url:
+            return ""
+
+        normalized = url.strip().lower()
+
+        # Remove trailing slash.
+        normalized = normalized.rstrip("/")
+
+        return normalized
+
+    @staticmethod
+    def _normalize_source(
+        source: str,
+    ) -> str:
+        """
+        Normalize source names.
+        """
+
+        if not source:
+            return ""
+
+        return (
+            source
+            .strip()
+            .lower()
+        )
+
+    @staticmethod
+    def _normalize_title(
+        title: str,
+    ) -> str:
+        """
+        Normalize titles for exact duplicate detection.
+        """
+
+        if not title:
+            return ""
+
+        normalized = (
+            title
+            .strip()
+            .lower()
+        )
+
+        # Collapse whitespace.
+        normalized = " ".join(
+            normalized.split()
+        )
+
+        # Remove common punctuation.
+        normalized = (
+            normalized
+            .replace(".", "")
+            .replace(",", "")
+            .replace(":", "")
+            .replace(";", "")
+            .replace("|", "")
+            .replace("-", " ")
+        )
+
+        return " ".join(
+            normalized.split()
+        )
+
+    # ==========================================================
+    # DEBUG / DIAGNOSTICS
+    # ==========================================================
+
+    def diagnostics(
+        self,
+        brief: MorningBrief,
+    ) -> dict[str, Any]:
+        """
+        Return diagnostic information about the generated brief.
+
+        Useful for tests, logging, monitoring and future
+        observability dashboards.
+        """
+
+        news = list(
+            getattr(
+                brief,
+                "top_news",
+                [],
+            )
+            or []
+        )
+
+        scores = [
+            self._article_score(
+                article
+            )
+            for article in news
+        ]
+
+        sources = [
+            self._article_source(
+                article
+            )
+            for article in news
+        ]
+
+        return {
+            "builder_version": self.VERSION,
+            "generated_at": getattr(
+                brief,
+                "generated_at",
+                None,
+            ),
+            "news_count": len(news),
+            "news_scores": scores,
+            "news_sources": sources,
+            "highest_news_score": (
+                max(scores)
+                if scores
+                else 0
+            ),
+            "lowest_news_score": (
+                min(scores)
+                if scores
+                else 0
+            ),
+            "health_score": getattr(
+                brief,
+                "health_score",
+                0,
+            ),
+            "market_sentiment": getattr(
+                brief,
+                "market_sentiment",
+                "Unknown",
+            ),
+            "confidence": getattr(
+                brief,
+                "confidence",
+                0,
+            ),
+        }

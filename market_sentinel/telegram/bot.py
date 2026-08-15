@@ -24,16 +24,6 @@ class TelegramBot:
 
     def __init__(self):
 
-        if not settings.TELEGRAM_BOT_TOKEN:
-            raise ValueError(
-                "Telegram token is missing. Set TELEGRAM_BOT_TOKEN in .env."
-            )
-
-        if not settings.TELEGRAM_CHAT_ID:
-            raise ValueError(
-                "Telegram chat ID is missing. Set TELEGRAM_CHAT_ID in .env."
-            )
-
         self.bot = Bot(
             token=settings.TELEGRAM_BOT_TOKEN
         )
@@ -50,13 +40,12 @@ class TelegramBot:
 
         try:
 
-            for chunk in self._message_chunks(message):
-                await self.bot.send_message(
-                    chat_id=self.chat_id,
-                    text=chunk,
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
-                )
+            await self.bot.send_message(
+                chat_id=self.chat_id,
+                text=message,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
 
             logger.success(
                 "Telegram message sent successfully."
@@ -96,23 +85,3 @@ class TelegramBot:
             )
 
             raise
-
-    @staticmethod
-    def _message_chunks(message: str, limit: int = 3900) -> list[str]:
-        """Split long brief sections on line boundaries below Telegram's cap."""
-        if len(message) <= limit:
-            return [message]
-        chunks: list[str] = []
-        current = ""
-        for line in message.splitlines(keepends=True):
-            if current and len(current) + len(line) > limit:
-                chunks.append(current.rstrip())
-                current = ""
-            # A single summary line is deliberately capped by the formatter;
-            # this fallback protects custom callers as well.
-            if len(line) > limit:
-                line = line[:limit]
-            current += line
-        if current.strip():
-            chunks.append(current.rstrip())
-        return chunks or [message[:limit]]

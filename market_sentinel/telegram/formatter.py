@@ -206,11 +206,11 @@ class BroadcastFormatter:
 
         return f"{change:+.2f}%"
 
-        lines.append(cls.LINE)
-        lines.append("🌍 <b>DAILY MARKET BRIEF</b>")
-        lines.append(f"📅 {brief.generated_at}")
-        lines.append(cls.LINE)
-        lines.append("")
+    @staticmethod
+    def _health(score: int) -> str:
+        """
+        Convert market-health score into a human-readable status.
+        """
 
         score = max(
             0,

@@ -1,8 +1,6 @@
 """
 market_sentinel/telegram/morning.py
-
 Formats the Morning Brief for Telegram.
-
 Author : Market Wavez
 """
 

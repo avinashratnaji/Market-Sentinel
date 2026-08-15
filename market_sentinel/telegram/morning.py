@@ -14,6 +14,8 @@ from market_sentinel.briefs.models import MorningBrief
 
 
 class MorningFormatter:
+    """
+    Production Telegram formatter for Morning Brief.
 
     LINE = "━━━━━━━━━━━━━━━━━━━━"
 
@@ -21,10 +23,33 @@ class MorningFormatter:
     # MAIN FORMATTER
     # ==========================================================
 
-    @staticmethod
+    The formatter deliberately keeps TOP 5 news in the
+    executive message and does NOT repeat the same articles
+    in a second "TOP MARKET NEWS" section.
+    """
+
+    LINE = "━━━━━━━━━━━━━━━━━━━━"
+    SHORT_LINE = "────────────────────"
+
+    MAX_TOP_NEWS = 5
+    MAX_GAINERS = 5
+    MAX_LOSERS = 5
+
+    # Telegram has a 4096-character message limit.
+    # Keep a safety margin.
+    TELEGRAM_MAX_LENGTH = 4000
+
+    # ==========================================================
+    # MAIN FORMATTER
+    # ==========================================================
+
+    @classmethod
     def format(
+        cls,
         brief: MorningBrief,
     ) -> list[str]:
+        """
+        Convert MorningBrief into Telegram messages.
 
         messages: list[str] = []
 
@@ -122,11 +147,29 @@ class MorningFormatter:
 
         if brief.indices:
 
-            lines = []
+        lines.append(cls.LINE)
+
+        top_news = list(
+            getattr(
+                brief,
+                "top_news",
+                None,
+            )
+            or []
+        )
+
+        if not top_news:
+
+            lines.append(
+                "ℹ️ No major Indian market-moving "
+                "news detected."
+            )
 
             lines.append(
                 "📊 <b>INDIAN MARKETS</b>"
             )
+            or "Market update"
+        )
 
             lines.append(
                 MorningFormatter.LINE
@@ -154,6 +197,16 @@ class MorningFormatter:
                 ],
                 key=lambda x: x.percent_change,
             )
+            or ""
+        ).strip()
+
+        score = cls._safe_number(
+            getattr(
+                article,
+                "score",
+                0,
+            )
+        )
 
             # ----------------------------------------------
             # UP
@@ -202,6 +255,7 @@ class MorningFormatter:
             messages.append(
                 "\n".join(lines)
             )
+        )
 
         # ======================================================
         # MESSAGE 3
@@ -210,11 +264,20 @@ class MorningFormatter:
 
         if brief.sectors:
 
-            lines = []
+        entities = (
+            getattr(
+                article,
+                "entities",
+                None,
+            )
+            or []
+        )
 
             lines.append(
                 "🌡 <b>SECTOR HEATMAP</b>"
             )
+            or []
+        )
 
             lines.append(
                 MorningFormatter.LINE
@@ -310,7 +373,7 @@ class MorningFormatter:
 
         if brief.gainers or brief.losers:
 
-            lines = []
+        if entity_text:
 
             # ==================================================
             # TOP GAINERS
@@ -375,8 +438,19 @@ class MorningFormatter:
                         )
                     )
 
-            messages.append(
-                "\n".join(lines)
+        # ------------------------------------------------------
+        # Summary
+        # ------------------------------------------------------
+
+        clean_summary = cls._clean_summary(
+            summary
+        )
+
+        if clean_summary:
+
+            clean_summary = cls._truncate(
+                clean_summary,
+                220,
             )
 
         # ======================================================
@@ -388,7 +462,16 @@ class MorningFormatter:
         # detail message only for callers that have not populated indian_news.
         if brief.top_news and not brief.indian_news:
 
-            lines = []
+            lines.append(
+                "   🕒 <b>Published:</b> "
+                f"{cls._format_datetime(published_at)}"
+            )
+
+        # ------------------------------------------------------
+        # Read article
+        # ------------------------------------------------------
+
+        if url:
 
             lines.append(
                 "🌐 <b>TOP MARKET NEWS</b>"
@@ -416,6 +499,184 @@ class MorningFormatter:
                         f"{title}"
                         f"</a>"
                     )
+                ) < 0
+            ],
+            key=lambda item: cls._safe_number(
+                getattr(
+                    item,
+                    "percent_change",
+                    0,
+                )
+            ),
+        )
+
+        if up:
+
+            lines.append("")
+            lines.append("🟢 <b>GAINING</b>")
+            lines.append("")
+
+            for index in up:
+                lines.append(
+                    cls._market_row(index)
+                )
+
+        if down:
+
+            lines.append("")
+            lines.append("🔴 <b>DECLINING</b>")
+            lines.append("")
+
+            for index in down:
+                lines.append(
+                    cls._market_row(index)
+                )
+
+        return "\n".join(lines)
+
+    # ==========================================================
+    # MESSAGE 3 — SECTORS
+    # ==========================================================
+
+    @classmethod
+    def _build_sector_message(
+        cls,
+        brief: MorningBrief,
+    ) -> str:
+        """Build sector heatmap."""
+
+        lines: list[str] = []
+
+        lines.append(
+            "🌡 <b>SECTOR HEATMAP</b>"
+        )
+
+        lines.append(cls.LINE)
+
+        sectors = sorted(
+            list(
+                getattr(
+                    brief,
+                    "sectors",
+                    None,
+                )
+                or []
+            ),
+            key=lambda item: cls._safe_number(
+                getattr(
+                    item,
+                    "percent_change",
+                    0,
+                )
+            ),
+            reverse=True,
+        )
+
+        positive: list[str] = []
+        neutral: list[str] = []
+        negative: list[str] = []
+
+        for sector in sectors:
+
+            change = cls._safe_number(
+                getattr(
+                    sector,
+                    "percent_change",
+                    0,
+                )
+            )
+
+            row = cls._sector_row(
+                sector
+            )
+
+            if change > 0.20:
+                positive.append(row)
+
+            elif change < -0.20:
+                negative.append(row)
+
+            else:
+                neutral.append(row)
+
+        if positive:
+
+            lines.append("")
+            lines.append("🟢 <b>BULLISH</b>")
+            lines.append("")
+            lines.extend(positive)
+
+        if neutral:
+
+            lines.append("")
+            lines.append("🟡 <b>NEUTRAL</b>")
+            lines.append("")
+            lines.extend(neutral)
+
+        if negative:
+
+            lines.append("")
+            lines.append("🔴 <b>BEARISH</b>")
+            lines.append("")
+            lines.extend(negative)
+
+        return "\n".join(lines)
+
+    # ==========================================================
+    # MESSAGE 4 — MOVERS
+    # ==========================================================
+
+    @classmethod
+    def _build_movers_message(
+        cls,
+        brief: MorningBrief,
+    ) -> str:
+        """Build top gainers and losers."""
+
+        lines: list[str] = []
+
+        gainers = sorted(
+            list(
+                getattr(
+                    brief,
+                    "gainers",
+                    None,
+                )
+                or []
+            ),
+            key=lambda item: cls._safe_number(
+                getattr(
+                    item,
+                    "percent_change",
+                    0,
+                )
+            ),
+            reverse=True,
+        )
+
+        losers = sorted(
+            list(
+                getattr(
+                    brief,
+                    "losers",
+                    None,
+                )
+                or []
+            ),
+            key=lambda item: cls._safe_number(
+                getattr(
+                    item,
+                    "percent_change",
+                    0,
+                )
+            ),
+        )
+
+        if gainers:
+
+            lines.append(
+                "🚀 <b>TOP GAINERS</b>"
+            )
 
                 else:
 
@@ -433,11 +694,15 @@ class MorningFormatter:
                     lines.append(
                         f"   <i>{escape(source)}</i>"
                     )
+                )
 
+        if losers:
+
+            if gainers:
                 lines.append("")
 
-            messages.append(
-                "\n".join(lines)
+            lines.append(
+                "🩸 <b>TOP LOSERS</b>"
             )
 
         # This is always present so a feed failure cannot silently make the
